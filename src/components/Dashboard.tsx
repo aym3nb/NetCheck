@@ -1,9 +1,11 @@
-import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink } from "lucide-react";
+import { useState } from "react";
+import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink, MapPin } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
 import { useTheme } from "@/hooks/useTheme";
@@ -72,6 +74,79 @@ function LeakIcon({ leak, loading }: { leak: DnsLeakInfo | null; loading: boolea
   );
 }
 
+// Major VPN exit-node cities for the location selector
+const VPN_CITIES = [
+  "Amsterdam",
+  "Atlanta",
+  "Chicago",
+  "Dallas",
+  "Frankfurt",
+  "Hong Kong",
+  "London",
+  "Los Angeles",
+  "Miami",
+  "New York",
+  "Paris",
+  "San Jose",
+  "Seattle",
+  "Singapore",
+  "Stockholm",
+  "Sydney",
+  "Tokyo",
+  "Toronto",
+  "Warsaw",
+  "Zurich",
+] as const;
+
+type AnonymityGrade = "A" | "C" | "F";
+
+interface AnonymityScore {
+  grade: AnonymityGrade;
+  label: string;
+  description: string;
+  colorClass: string;
+}
+
+function computeAnonymityScore({
+  nextDnsOk,
+  vpnLocationMatch,
+  hasSelectedCity,
+  dnsLeakDetected,
+}: {
+  nextDnsOk: boolean;
+  vpnLocationMatch: boolean;
+  hasSelectedCity: boolean;
+  dnsLeakDetected: boolean;
+}): AnonymityScore {
+  if (dnsLeakDetected || !nextDnsOk) {
+    return {
+      grade: "F",
+      label: "Grade F: Exposed",
+      description: dnsLeakDetected
+        ? "DNS leak detected — your resolver is visible to third parties."
+        : "NextDNS is not active — DNS queries are unencrypted.",
+      colorClass: "text-red-500",
+    };
+  }
+  if (nextDnsOk && hasSelectedCity && vpnLocationMatch) {
+    return {
+      grade: "A",
+      label: "Grade A: Fully Encrypted & Proxied",
+      description: "NextDNS is active, no DNS leaks, and your public IP matches the expected VPN exit node.",
+      colorClass: "text-emerald-500",
+    };
+  }
+  // nextDNS active but no matched VPN city
+  return {
+    grade: "C",
+    label: "Grade C: Encrypted, No VPN Match",
+    description: hasSelectedCity
+      ? "NextDNS is active but your IP location doesn't match the expected VPN exit node."
+      : "NextDNS is active but no expected VPN location is set.",
+    colorClass: "text-yellow-500",
+  };
+}
+
 function AuditLog({ entries }: { entries: AuditEntry[] }) {
   if (entries.length === 0) return null;
   return (
@@ -103,6 +178,7 @@ export function Dashboard() {
   const { ipInfo, nextDns, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, dnsResolverInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
+  const [selectedCity, setSelectedCity] = useState<string>("");
 
   const getPingLabel = (ms: number | null): string | null => {
     if (ms === null) return null;
@@ -112,6 +188,23 @@ export function Dashboard() {
   };
 
   const validLeakEntries = dnsLeakEntries.filter((e) => e.ip);
+
+  // VPN location match — locale-aware, accent/case-insensitive comparison against the city from IP lookup
+  const hasSelectedCity = selectedCity !== "";
+  const vpnLocationMatch =
+    hasSelectedCity &&
+    ipInfo?.city != null &&
+    ipInfo.city.localeCompare(selectedCity, undefined, { sensitivity: "base" }) === 0;
+
+  // Anonymity score — only computed once loading is done
+  const nextDnsOk = nextDns.status === "ok";
+  const dnsLeakDetected = dnsLeakAllSecure === false;
+  const anonymityScore = computeAnonymityScore({
+    nextDnsOk,
+    vpnLocationMatch,
+    hasSelectedCity,
+    dnsLeakDetected,
+  });
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -179,6 +272,43 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* Anonymity & Privacy Score */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="w-4 h-4 text-slate-400" />
+              Anonymity & Privacy Score
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="flex items-center gap-6">
+                <Skeleton className="h-16 w-14 rounded-md" />
+                <div className="space-y-2 flex-1">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-72" />
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-6">
+                <span
+                  className={cn(
+                    "text-6xl font-black leading-none select-none",
+                    anonymityScore.colorClass
+                  )}
+                  aria-label={`Anonymity grade ${anonymityScore.grade}`}
+                >
+                  {anonymityScore.grade}
+                </span>
+                <div>
+                  <p className="text-sm font-semibold">{anonymityScore.label}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{anonymityScore.description}</p>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Diagnostic Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Public Identity Card */}
@@ -189,15 +319,60 @@ export function Dashboard() {
                 Public Identity
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-0">
-              <DataRow label="IP Address" value={ipInfo?.ip} loading={loading} />
-              <DataRow label="ISP / Org" value={ipInfo?.org || ipInfo?.isp} loading={loading} />
-              <DataRow
-                label="Location"
-                value={ipInfo ? `${ipInfo.city}, ${ipInfo.region}, ${ipInfo.country_name}` : null}
-                loading={loading}
-              />
-              <DataRow label="Timezone" value={ipInfo?.timezone} loading={loading} />
+            <CardContent className="space-y-3">
+              <div className="space-y-0">
+                <DataRow label="IP Address" value={ipInfo?.ip} loading={loading} />
+                <DataRow label="ISP / Org" value={ipInfo?.org || ipInfo?.isp} loading={loading} />
+                <DataRow
+                  label="Location"
+                  value={ipInfo ? `${ipInfo.city}, ${ipInfo.region}, ${ipInfo.country_name}` : null}
+                  loading={loading}
+                />
+                <DataRow label="Timezone" value={ipInfo?.timezone} loading={loading} />
+              </div>
+
+              {/* VPN Expected-Location Validator */}
+              <div className="pt-1 space-y-2">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground font-medium">Expected VPN Exit Node</span>
+                </div>
+                <Select value={selectedCity} onValueChange={setSelectedCity}>
+                  <SelectTrigger aria-label="Select expected VPN exit city" className="h-8 text-xs">
+                    <SelectValue placeholder="Select a city…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Major Exit Nodes</SelectLabel>
+                      {VPN_CITIES.map((city) => (
+                        <SelectItem key={city} value={city}>
+                          {city}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                {/* VPN location badge */}
+                {(() => {
+                  if (loading && hasSelectedCity) return <Skeleton className="h-6 w-36" />;
+                  if (!hasSelectedCity) return null;
+                  if (vpnLocationMatch) {
+                    return (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-emerald-500 px-2.5 py-0.5 text-xs font-semibold text-white">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        VPN Exit Verified
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-red-500 px-2.5 py-0.5 text-xs font-semibold text-white animate-pulse">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      Location Mismatch
+                    </span>
+                  );
+                })()}
+              </div>
             </CardContent>
           </Card>
 
