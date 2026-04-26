@@ -279,7 +279,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
               ip: dnsLeak.ip,
               country: dnsLeak.geo,
               countryCode: "",
-              isp: data.dns.geo || "Unknown",
+              isp: data.dns.isp || data.dns.org || "Unknown",
               status: "unknown",
             },
           ];
