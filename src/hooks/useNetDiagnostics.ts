@@ -13,7 +13,7 @@ export interface IpInfo {
 }
 
 export interface NextDnsInfo {
-  status: "ok" | "not-using" | "blocked" | "error" | "loading";
+  status: "ok" | "not-using" | "blocked" | "error" | "loading" | "manual";
   configId?: string;
   protocol?: string;
   server?: string;
@@ -25,6 +25,12 @@ export interface DnsLeakInfo {
   ip: string;
   geo: string;
   isSameAsPublic: boolean;
+}
+
+export interface DnsResolverInfo {
+  ip: string;
+  isp: string;
+  geo: string;
 }
 
 export interface DnsLeakEntry {
@@ -53,6 +59,7 @@ export interface DiagnosticState {
   dnsLeak: DnsLeakInfo | null;
   dnsLeakEntries: DnsLeakEntry[];
   dnsLeakAllSecure: boolean | null;
+  dnsResolverInfo: DnsResolverInfo | null;
   latency: LatencyInfo;
   loading: boolean;
   lastUpdated: Date | null;
@@ -136,6 +143,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
     dnsLeak: null,
     dnsLeakEntries: [],
     dnsLeakAllSecure: null,
+    dnsResolverInfo: null,
     latency: { pingMs: null, connectionType: "Unknown" },
     loading: true,
     lastUpdated: null,
@@ -179,9 +187,9 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       try {
         const fallbackResp = await fetchNoCorsWithTimeout("https://test.nextdns.io", { mode: "no-cors" });
         if (fallbackResp.type === "opaque") {
-          // Server is reachable but we can't read the response body — treat as connected
-          nextDns = { status: "ok", protocol: "Connected (Basic)" };
-          newEntries.push(makeEntry("NextDNS Check", "Connected (Basic)"));
+          // Server is reachable but we can't read the response body — manual verification required
+          nextDns = { status: "manual" };
+          newEntries.push(makeEntry("NextDNS Check", "Reachable — Manual Check Required"));
         } else {
           nextDns = { status: "not-using" };
           newEntries.push(makeEntry("NextDNS Check", "Not Configured"));
@@ -276,33 +284,27 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
         newEntries.push(makeEntry("DNS Leak Test", "200 OK — No Resolvers"));
       }
     } catch {
-      // Fallback: legacy single-resolver endpoint
-      try {
-        const resp = await fetchWithTimeout("https://edns.ip-api.com/json");
-        const data = await resp.json();
-        if (data && data.dns) {
-          dnsLeak = {
-            ip: data.dns.ip || "Unknown",
-            geo: data.dns.geo || "Unknown",
-            isSameAsPublic: ipInfo ? data.dns.ip === ipInfo.ip : false,
-          };
-          dnsLeakEntries = [
-            {
-              ip: dnsLeak.ip,
-              country: dnsLeak.geo,
-              countryCode: "",
-              isp: data.dns.isp || data.dns.org || "Unknown",
-              status: "unknown",
-            },
-          ];
-          newEntries.push(makeEntry("DNS Leak Test (Fallback)", dnsLeak.isSameAsPublic ? "Possible Leak" : "Clean"));
-        } else {
-          newEntries.push(makeEntry("DNS Leak Test", "200 OK — No Data"));
-        }
-      } catch (fallbackErr) {
-        const code = isCorsOrNetworkError(fallbackErr) ? "Blocked/Firewalled" : (fallbackErr instanceof Error ? fallbackErr.message : "ERR");
-        newEntries.push(makeEntry("DNS Leak Test", code));
+      newEntries.push(makeEntry("DNS Leak Test", "Unavailable — Use external test"));
+    }
+
+    // --- Primary DNS Resolver Info (ip-api.com) — always runs ---
+    let dnsResolverInfo: DnsResolverInfo | null = null;
+    try {
+      const resp = await fetchWithTimeout("https://edns.ip-api.com/json");
+      const data = await resp.json();
+      if (data && data.dns) {
+        dnsResolverInfo = {
+          ip: data.dns.ip || "Unknown",
+          isp: data.dns.isp || data.dns.org || "Unknown",
+          geo: data.dns.geo || "Unknown",
+        };
+        newEntries.push(makeEntry("DNS Resolver Info", "200 OK"));
+      } else {
+        newEntries.push(makeEntry("DNS Resolver Info", "200 OK — No Data"));
       }
+    } catch (err) {
+      const code = isCorsOrNetworkError(err) ? "Blocked/Firewalled" : (err instanceof Error ? err.message : "ERR");
+      newEntries.push(makeEntry("DNS Resolver Info", code));
     }
 
     // --- Latency ---
@@ -322,6 +324,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       dnsLeak,
       dnsLeakEntries,
       dnsLeakAllSecure,
+      dnsResolverInfo,
       latency: { pingMs, connectionType },
       loading: false,
       lastUpdated: new Date(),
