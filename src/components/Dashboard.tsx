@@ -1,13 +1,14 @@
-import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock, Sun, Moon } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock, Sun, Moon, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
 import { useTheme } from "@/hooks/useTheme";
-import type { NextDnsInfo, DnsLeakInfo, AuditEntry } from "@/hooks/useNetDiagnostics";
+import type { NextDnsInfo, DnsLeakInfo, DnsLeakEntry, AuditEntry } from "@/hooks/useNetDiagnostics";
 import { cn } from "@/lib/utils";
 
 function DataRow({ label, value, loading }: { label: string; value?: string | null; loading: boolean }) {
@@ -66,6 +67,97 @@ function LeakIcon({ leak, loading }: { leak: DnsLeakInfo | null; loading: boolea
   );
 }
 
+function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]; allSecure: boolean | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-8 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return <p className="text-sm text-muted-foreground py-2">No resolver data available.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Master validation banner */}
+      {allSecure === true && (
+        <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
+          <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Secure: No Leaks Detected</p>
+            <p className="text-xs text-muted-foreground">All {entries.length} resolver(s) confirmed NextDNS infrastructure</p>
+          </div>
+        </div>
+      )}
+      {allSecure === false && (
+        <div className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3">
+          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-red-600 dark:text-red-400">DNS Leak Detected</p>
+            <p className="text-xs text-muted-foreground">
+              {entries.filter((e) => e.status === "leak").length} of {entries.length} resolver(s) are not NextDNS
+            </p>
+          </div>
+        </div>
+      )}
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>IP Address</TableHead>
+            <TableHead>Location</TableHead>
+            <TableHead>ISP / Organization</TableHead>
+            <TableHead className="text-right">Status</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {entries.map((entry) => (
+            <TableRow key={entry.ip}>
+              <TableCell className="font-mono text-xs">{entry.ip}</TableCell>
+              <TableCell className="text-xs">
+                {entry.countryCode && (
+                  <span className="mr-1.5">{countryCodeToFlag(entry.countryCode)}</span>
+                )}
+                {entry.country}
+              </TableCell>
+              <TableCell className="text-xs max-w-[180px] truncate">{entry.isp || "—"}</TableCell>
+              <TableCell className="text-right">
+                {entry.status === "secure" ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    NextDNS
+                  </span>
+                ) : entry.status === "leak" ? (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-red-500 px-2 py-0.5 text-xs font-semibold text-white">
+                    <AlertTriangle className="w-3 h-3" />
+                    LEAKING
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Unknown</span>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function countryCodeToFlag(code: string): string {
+  if (!code || code.length !== 2) return "";
+  return code
+    .toUpperCase()
+    .split("")
+    .map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65))
+    .join("");
+}
+
 function AuditLog({ entries }: { entries: AuditEntry[] }) {
   if (entries.length === 0) return null;
   return (
@@ -104,7 +196,7 @@ function getNextDnsStatusMessage(nextDns: NextDnsInfo): string {
 }
 
 export function Dashboard() {
-  const { ipInfo, nextDns, dnsLeak, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
+  const { ipInfo, nextDns, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
 
@@ -226,31 +318,19 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* DNS Security Card */}
-          <Card className="shadow-sm">
+          {/* DNS Leak Test Card */}
+          <Card className="shadow-sm md:col-span-2">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-base">
                 <span className="flex items-center gap-2">
                   <LeakIcon leak={dnsLeak} loading={loading} />
-                  DNS Security
+                  DNS Leak Test
                 </span>
                 <StatusBadge status={loading ? null : dnsLeak?.isSameAsPublic ? "leak" : "clean"} loading={loading} />
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-0">
-              <DataRow label="Resolver IP" value={dnsLeak?.ip} loading={loading} />
-              <DataRow label="Resolver Geo" value={dnsLeak?.geo} loading={loading} />
-              <DataRow
-                label="Leak Status"
-                value={
-                  dnsLeak
-                    ? dnsLeak.isSameAsPublic
-                      ? "⚠ Resolver matches public IP"
-                      : "✓ Different resolver detected"
-                    : null
-                }
-                loading={loading}
-              />
+            <CardContent>
+              <DnsLeakTable entries={dnsLeakEntries} allSecure={dnsLeakAllSecure} loading={loading} />
             </CardContent>
           </Card>
 
