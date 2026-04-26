@@ -116,8 +116,8 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
           </TableRow>
         </TableHeader>
         <TableBody>
-          {entries.map((entry, i) => (
-            <TableRow key={i}>
+          {entries.map((entry) => (
+            <TableRow key={entry.ip}>
               <TableCell className="font-mono text-xs">{entry.ip}</TableCell>
               <TableCell className="text-xs">
                 {entry.countryCode && (
