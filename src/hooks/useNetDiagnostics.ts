@@ -76,6 +76,18 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise
   }
 }
 
+/** Like fetchWithTimeout but omits the response.ok check, for use with mode:'no-cors'
+ *  where the browser always returns an opaque response with status 0. */
+async function fetchNoCorsWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function measureLatency(): Promise<number> {
   const start = performance.now();
   try {
@@ -165,7 +177,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
     } catch {
       // Proxy failed; attempt no-cors fallback
       try {
-        const fallbackResp = await fetch("https://test.nextdns.io", { mode: "no-cors", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        const fallbackResp = await fetchNoCorsWithTimeout("https://test.nextdns.io", { mode: "no-cors" });
         if (fallbackResp.type === "opaque") {
           // Server is reachable but we can't read the response body — treat as connected
           nextDns = { status: "ok", protocol: "Connected (Basic)" };
