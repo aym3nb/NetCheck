@@ -152,9 +152,13 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
         // Fallback: try DoH to determine if it's a CORS issue or a true network block
         let blockReason: NextDnsInfo["blockReason"] = "network";
         try {
-          await fetchWithTimeout("https://dns.nextdns.io/resolve?name=test.nextdns.io", { mode: "cors" });
-          // DoH succeeded → endpoint is reachable via DNS-over-HTTPS, so the block is at the CORS/browser level
-          blockReason = "cors";
+          const dohResp = await fetchWithTimeout("https://dns.nextdns.io/resolve?name=test.nextdns.io", { mode: "cors" });
+          const dohData = await dohResp.json();
+          // A valid DoH response includes a 'Status' field (0 = NOERROR) and an 'Answer' array
+          if (typeof dohData === "object" && dohData !== null && "Status" in dohData) {
+            // DoH endpoint is reachable → the block is at the CORS/browser level
+            blockReason = "cors";
+          }
         } catch {
           // DoH also failed → network-level interception (e.g. OpenWRT firewall rule)
           blockReason = "network";

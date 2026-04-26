@@ -93,6 +93,16 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
   );
 }
 
+function getNextDnsStatusMessage(nextDns: NextDnsInfo): string {
+  if (nextDns.status === "ok") return "✓ Using NextDNS";
+  if (nextDns.status === "blocked") {
+    return nextDns.blockReason === "cors"
+      ? "⊘ Browser/CORS Blocked"
+      : "⊘ Connection Blocked (Firewall)";
+  }
+  return "✗ NextDNS Not Configured";
+}
+
 export function Dashboard() {
   const { ipInfo, nextDns, dnsLeak, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
@@ -206,15 +216,7 @@ export function Dashboard() {
             <CardContent className="space-y-0">
               <DataRow
                 label="Status"
-                value={
-                  nextDns.status === "ok"
-                    ? "✓ Using NextDNS"
-                    : nextDns.status === "blocked"
-                      ? nextDns.blockReason === "cors"
-                        ? "⊘ Browser/CORS Blocked"
-                        : "⊘ Connection Blocked (Firewall)"
-                      : "✗ NextDNS Not Configured"
-                }
+                value={getNextDnsStatusMessage(nextDns)}
                 loading={loading}
               />
               <DataRow label="Config ID" value={nextDns.configId || "—"} loading={loading} />
