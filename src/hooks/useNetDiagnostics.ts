@@ -17,6 +17,8 @@ export interface NextDnsInfo {
   configId?: string;
   protocol?: string;
   server?: string;
+  /** Extra detail when status is 'blocked': 'cors' means browser/CORS blocked; 'network' means firewall-level */
+  blockReason?: "cors" | "network";
 }
 
 export interface DnsLeakInfo {
@@ -136,19 +138,29 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
     // --- NextDNS ---
     let nextDns: NextDnsInfo = { status: "not-using" };
     try {
-      const resp = await fetchWithTimeout("https://test.nextdns.io/");
+      const resp = await fetchWithTimeout("https://test.nextdns.io/", { mode: "cors" });
       const data = await resp.json();
       if (data && data.status === "ok") {
         nextDns = { status: "ok", configId: data.configId, protocol: data.protocol, server: data.server };
         newEntries.push(makeEntry("NextDNS Check", "200 OK — Linked"));
       } else {
         nextDns = { status: "not-using" };
-        newEntries.push(makeEntry("NextDNS Check", "200 OK — Not linked"));
+        newEntries.push(makeEntry("NextDNS Check", "200 OK — Not Configured"));
       }
     } catch (err) {
       if (isCorsOrNetworkError(err)) {
-        nextDns = { status: "blocked" };
-        newEntries.push(makeEntry("NextDNS Check", "Blocked/Firewalled"));
+        // Fallback: try DoH to determine if it's a CORS issue or a true network block
+        let blockReason: NextDnsInfo["blockReason"] = "network";
+        try {
+          await fetchWithTimeout("https://dns.nextdns.io/resolve?name=test.nextdns.io", { mode: "cors" });
+          // DoH succeeded → endpoint is reachable via DNS-over-HTTPS, so the block is at the CORS/browser level
+          blockReason = "cors";
+        } catch {
+          // DoH also failed → network-level interception (e.g. OpenWRT firewall rule)
+          blockReason = "network";
+        }
+        nextDns = { status: "blocked", blockReason };
+        newEntries.push(makeEntry("NextDNS Check", blockReason === "cors" ? "Blocked/CORS" : "Blocked/Firewalled"));
       } else {
         nextDns = { status: "not-using" };
         newEntries.push(makeEntry("NextDNS Check", err instanceof Error ? err.message : "ERR"));

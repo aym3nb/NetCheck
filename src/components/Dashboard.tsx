@@ -1,4 +1,4 @@
-import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock, Sun, Moon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
+import { useTheme } from "@/hooks/useTheme";
 import type { NextDnsInfo, DnsLeakInfo, AuditEntry } from "@/hooks/useNetDiagnostics";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +28,7 @@ function StatusBadge({ status, loading }: { status: NextDnsInfo["status"] | "lea
 
   const variants: Record<string, { label: string; className: string }> = {
     ok: { label: "Active", className: "bg-emerald-500 text-white border-transparent" },
-    "not-using": { label: "Inactive", className: "bg-secondary text-secondary-foreground border-transparent" },
+    "not-using": { label: "Not Configured", className: "bg-secondary text-secondary-foreground border-transparent" },
     blocked: { label: "Blocked", className: "bg-red-500 text-white border-transparent animate-pulse" },
     error: { label: "Error", className: "bg-red-500 text-white border-transparent animate-pulse" },
     loading: { label: "Loading…", className: "bg-secondary text-secondary-foreground border-transparent" },
@@ -95,6 +96,7 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
 export function Dashboard() {
   const { ipInfo, nextDns, dnsLeak, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
+  const { theme, toggleTheme } = useTheme();
 
   const getPingLabel = (ms: number | null) => {
     if (ms === null) return "—";
@@ -139,6 +141,15 @@ export function Dashboard() {
             <Button size="sm" variant="outline" onClick={refresh} disabled={loading} className="gap-2">
               <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
               <span className="hidden sm:inline">Refresh</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={toggleTheme}
+              aria-label="Toggle dark mode"
+              className="w-9 px-0"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </Button>
           </div>
         </div>
@@ -199,8 +210,10 @@ export function Dashboard() {
                   nextDns.status === "ok"
                     ? "✓ Using NextDNS"
                     : nextDns.status === "blocked"
-                      ? "⊘ Blocked / Firewalled"
-                      : "✗ Not using NextDNS"
+                      ? nextDns.blockReason === "cors"
+                        ? "⊘ Browser/CORS Blocked"
+                        : "⊘ Connection Blocked (Firewall)"
+                      : "✗ NextDNS Not Configured"
                 }
                 loading={loading}
               />
