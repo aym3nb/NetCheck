@@ -116,8 +116,8 @@ function getConnectionType(): string {
     webkitConnection?: { effectiveType?: string; type?: string };
   };
   const conn = nav.connection || nav.mozConnection || nav.webkitConnection;
-  if (!conn) return "Unknown";
-  return conn.effectiveType || conn.type || "Unknown";
+  if (!conn) return "";
+  return conn.effectiveType || conn.type || "";
 }
 
 function isCorsOrNetworkError(err: unknown): boolean {
@@ -144,7 +144,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
     dnsLeakEntries: [],
     dnsLeakAllSecure: null,
     dnsResolverInfo: null,
-    latency: { pingMs: null, connectionType: "Unknown" },
+    latency: { pingMs: null, connectionType: "" },
     loading: true,
     lastUpdated: null,
     error: null,
@@ -253,8 +253,8 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
               isp.toLowerCase().includes("anexia") ||
               hostname.toLowerCase().includes("nextdns");
             return {
-              ip: r.ip ?? "Unknown",
-              country: r.country ?? "Unknown",
+              ip: r.ip ?? "",
+              country: r.country ?? "",
               countryCode: r.country_code ?? "",
               isp,
               hostname,
@@ -294,9 +294,9 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       const data = await resp.json();
       if (data && data.dns) {
         dnsResolverInfo = {
-          ip: data.dns.ip || "Unknown",
-          isp: data.dns.isp || data.dns.org || "Unknown",
-          geo: data.dns.geo || "Unknown",
+          ip: data.dns.ip || "",
+          isp: data.dns.isp || data.dns.org || "",
+          geo: data.dns.geo || "",
         };
         newEntries.push(makeEntry("DNS Resolver Info", "200 OK"));
       } else {

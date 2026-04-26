@@ -11,14 +11,17 @@ import { useTheme } from "@/hooks/useTheme";
 import type { NextDnsInfo, DnsLeakInfo, DnsLeakEntry, AuditEntry, DnsResolverInfo } from "@/hooks/useNetDiagnostics";
 import { cn } from "@/lib/utils";
 
+const PLACEHOLDER_VALUES = new Set(["Unknown", "—", "Basic", ""]);
+
 function DataRow({ label, value, loading }: { label: string; value?: string | null; loading: boolean }) {
+  if (!loading && (!value || PLACEHOLDER_VALUES.has(value))) return null;
   return (
     <div className="flex items-start justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
       <span className="text-sm text-muted-foreground flex-shrink-0">{label}</span>
       {loading ? (
         <Skeleton className="h-4 w-32" />
       ) : (
-        <span className="text-sm font-medium text-right break-all">{value || "—"}</span>
+        <span className="text-sm font-medium text-right break-all">{value}</span>
       )}
     </div>
   );
@@ -80,7 +83,9 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
     );
   }
 
-  if (entries.length === 0) {
+  const validEntries = entries.filter((e) => e.ip && e.ip !== "Unknown");
+
+  if (validEntries.length === 0) {
     return <p className="text-sm text-muted-foreground py-2">No resolver data available.</p>;
   }
 
@@ -92,7 +97,7 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
           <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0" />
           <div>
             <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Secure: No Leaks Detected</p>
-            <p className="text-xs text-muted-foreground">All {entries.length} resolver(s) confirmed NextDNS infrastructure</p>
+            <p className="text-xs text-muted-foreground">All {validEntries.length} resolver(s) confirmed NextDNS infrastructure</p>
           </div>
         </div>
       )}
@@ -102,7 +107,7 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
           <div>
             <p className="text-sm font-semibold text-red-600 dark:text-red-400">DNS Leak Detected</p>
             <p className="text-xs text-muted-foreground">
-              {entries.filter((e) => e.status === "leak").length} of {entries.length} resolver(s) are not NextDNS
+              {validEntries.filter((e) => e.status === "leak").length} of {validEntries.length} resolver(s) are not NextDNS
             </p>
           </div>
         </div>
@@ -118,16 +123,16 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
           </TableRow>
         </TableHeader>
         <TableBody>
-          {entries.map((entry) => (
+          {validEntries.map((entry) => (
             <TableRow key={entry.ip}>
               <TableCell className="font-mono text-xs">{entry.ip}</TableCell>
               <TableCell className="text-xs">
                 {entry.countryCode && (
                   <span className="mr-1.5">{countryCodeToFlag(entry.countryCode)}</span>
                 )}
-                {entry.country}
+                {entry.country && entry.country !== "Unknown" ? entry.country : null}
               </TableCell>
-              <TableCell className="text-xs max-w-[180px] truncate">{entry.isp || "—"}</TableCell>
+              <TableCell className="text-xs max-w-[180px] truncate">{entry.isp || null}</TableCell>
               <TableCell className="text-right">
                 {entry.status === "secure" ? (
                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
@@ -139,9 +144,7 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
                     <AlertTriangle className="w-3 h-3" />
                     LEAKING
                   </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Unknown</span>
-                )}
+                ) : null}
               </TableCell>
             </TableRow>
           ))}
@@ -337,9 +340,9 @@ export function Dashboard() {
                   value={getNextDnsStatusMessage(nextDns)}
                   loading={loading}
                 />
-                <DataRow label="Config ID" value={nextDns.configId || "—"} loading={loading} />
-                <DataRow label="Protocol" value={nextDns.protocol || "—"} loading={loading} />
-                <DataRow label="Server" value={nextDns.server || "—"} loading={loading} />
+                <DataRow label="Config ID" value={nextDns.configId} loading={loading} />
+                <DataRow label="Protocol" value={nextDns.protocol} loading={loading} />
+                <DataRow label="Server" value={nextDns.server} loading={loading} />
               </div>
               <Button
                 variant="outline"
