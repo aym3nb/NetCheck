@@ -1,4 +1,4 @@
-import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock, Sun, Moon, AlertTriangle } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock, Sun, Moon, AlertTriangle, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
 import { useTheme } from "@/hooks/useTheme";
-import type { NextDnsInfo, DnsLeakInfo, DnsLeakEntry, AuditEntry } from "@/hooks/useNetDiagnostics";
+import type { NextDnsInfo, DnsLeakInfo, DnsLeakEntry, AuditEntry, DnsResolverInfo } from "@/hooks/useNetDiagnostics";
 import { cn } from "@/lib/utils";
 
 function DataRow({ label, value, loading }: { label: string; value?: string | null; loading: boolean }) {
@@ -33,6 +33,7 @@ function StatusBadge({ status, loading }: { status: NextDnsInfo["status"] | "lea
     blocked: { label: "Blocked", className: "bg-red-500 text-white border-transparent animate-pulse" },
     error: { label: "Error", className: "bg-red-500 text-white border-transparent animate-pulse" },
     loading: { label: "Loading…", className: "bg-secondary text-secondary-foreground border-transparent" },
+    manual: { label: "Manual Check Required", className: "bg-yellow-500 text-white border-transparent" },
     leak: { label: "Possible Leak", className: "bg-yellow-500 text-white border-transparent animate-pulse" },
     clean: { label: "No Leak", className: "bg-emerald-500 text-white border-transparent" },
   };
@@ -54,6 +55,7 @@ function NextDnsIcon({ status, loading }: { status: NextDnsInfo["status"]; loadi
   if (loading) return <ShieldCheck className="w-4 h-4 text-muted-foreground animate-pulse" />;
   if (status === "ok") return <ShieldCheck className="w-4 h-4 text-emerald-500" />;
   if (status === "blocked") return <ShieldX className="w-4 h-4 text-red-500 animate-pulse" />;
+  if (status === "manual") return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
   return <ShieldX className="w-4 h-4 text-muted-foreground" />;
 }
 
@@ -149,6 +151,27 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
   );
 }
 
+function DnsResolverOverview({ resolverInfo, loading }: { resolverInfo: DnsResolverInfo | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-4 w-64" />
+      </div>
+    );
+  }
+  if (!resolverInfo) {
+    return <p className="text-sm text-muted-foreground py-1">Resolver data unavailable.</p>;
+  }
+  return (
+    <div className="space-y-0">
+      <DataRow label="Resolver IP" value={resolverInfo.ip} loading={false} />
+      <DataRow label="Resolver ISP" value={resolverInfo.isp} loading={false} />
+      <DataRow label="Location" value={resolverInfo.geo} loading={false} />
+    </div>
+  );
+}
+
 function countryCodeToFlag(code: string): string {
   if (!code || code.length !== 2) return "";
   return code
@@ -186,25 +209,26 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
 }
 
 function getNextDnsStatusMessage(nextDns: NextDnsInfo): string {
-  if (nextDns.status === "ok") return "✓ Using NextDNS";
+  if (nextDns.status === "ok") return "Using NextDNS";
+  if (nextDns.status === "manual") return "Reachable — Manual verification recommended";
   if (nextDns.status === "blocked") {
     return nextDns.blockReason === "cors"
-      ? "⊘ Browser/CORS Blocked"
-      : "⊘ Connection Blocked (Firewall)";
+      ? "Browser / CORS Blocked"
+      : "Connection Blocked (Firewall)";
   }
-  return "✗ NextDNS Not Configured";
+  return "NextDNS Not Configured";
 }
 
 export function Dashboard() {
-  const { ipInfo, nextDns, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
+  const { ipInfo, nextDns, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, dnsResolverInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
 
   const getPingLabel = (ms: number | null) => {
     if (ms === null) return "—";
-    if (ms < 50) return `${ms} ms ⚡`;
-    if (ms < 150) return `${ms} ms ✓`;
-    return `${ms} ms ⚠`;
+    if (ms < 50) return `${ms} ms — Excellent`;
+    if (ms < 150) return `${ms} ms — Good`;
+    return `${ms} ms — Fair`;
   };
 
   return (
@@ -306,15 +330,28 @@ export function Dashboard() {
                 <StatusBadge status={nextDns.status} loading={loading} />
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-0">
-              <DataRow
-                label="Status"
-                value={getNextDnsStatusMessage(nextDns)}
-                loading={loading}
-              />
-              <DataRow label="Config ID" value={nextDns.configId || "—"} loading={loading} />
-              <DataRow label="Protocol" value={nextDns.protocol || "—"} loading={loading} />
-              <DataRow label="Server" value={nextDns.server || "—"} loading={loading} />
+            <CardContent className="space-y-3">
+              <div className="space-y-0">
+                <DataRow
+                  label="Status"
+                  value={getNextDnsStatusMessage(nextDns)}
+                  loading={loading}
+                />
+                <DataRow label="Config ID" value={nextDns.configId || "—"} loading={loading} />
+                <DataRow label="Protocol" value={nextDns.protocol || "—"} loading={loading} />
+                <DataRow label="Server" value={nextDns.server || "—"} loading={loading} />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2"
+                asChild
+              >
+                <a href="https://test.nextdns.io" target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Check Detailed Logs
+                </a>
+              </Button>
             </CardContent>
           </Card>
 
@@ -329,8 +366,33 @@ export function Dashboard() {
                 <StatusBadge status={loading ? null : dnsLeak?.isSameAsPublic ? "leak" : "clean"} loading={loading} />
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <DnsLeakTable entries={dnsLeakEntries} allSecure={dnsLeakAllSecure} loading={loading} />
+            <CardContent className="space-y-4">
+              {/* Primary resolver overview from ip-api.com */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Primary DNS Resolver</p>
+                <DnsResolverOverview resolverInfo={dnsResolverInfo} loading={loading} />
+              </div>
+
+              {/* Multi-resolver detail table (bash.ws) */}
+              {(loading || dnsLeakEntries.length > 0) && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Multi-Resolver Detail</p>
+                  <DnsLeakTable entries={dnsLeakEntries} allSecure={dnsLeakAllSecure} loading={loading} />
+                </div>
+              )}
+
+              {/* External test link */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2"
+                asChild
+              >
+                <a href="https://dnsleaktest.com" target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Launch Full DNS Leak Test
+                </a>
+              </Button>
             </CardContent>
           </Card>
 
@@ -366,7 +428,12 @@ export function Dashboard() {
         <AuditLog entries={auditLog} />
 
         <p className="text-center text-xs text-muted-foreground">
-          Data fetched from ipapi.co, test.nextdns.io, and edns.ip-api.com — All requests made client-side
+          Data fetched from ipapi.co, test.nextdns.io, edns.ip-api.com, and bash.ws — All requests made client-side.{" "}
+          Deep-packet diagnostics via{" "}
+          <a href="https://dnsleaktest.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground transition-colors">
+            dnsleaktest.com
+          </a>
+          .
         </p>
       </main>
     </div>
