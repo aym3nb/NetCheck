@@ -189,12 +189,12 @@ export function Dashboard() {
 
   const validLeakEntries = dnsLeakEntries.filter((e) => e.ip);
 
-  // VPN location match — case-insensitive comparison against the city from IP lookup
+  // VPN location match — locale-aware, accent/case-insensitive comparison against the city from IP lookup
   const hasSelectedCity = selectedCity !== "";
   const vpnLocationMatch =
     hasSelectedCity &&
     ipInfo?.city != null &&
-    ipInfo.city.toLowerCase() === selectedCity.toLowerCase();
+    ipInfo.city.localeCompare(selectedCity, undefined, { sensitivity: "base" }) === 0;
 
   // Anonymity score — only computed once loading is done
   const nextDnsOk = nextDns.status === "ok";
@@ -354,21 +354,24 @@ export function Dashboard() {
                 </Select>
 
                 {/* VPN location badge */}
-                {loading && hasSelectedCity ? (
-                  <Skeleton className="h-6 w-36" />
-                ) : hasSelectedCity ? (
-                  vpnLocationMatch ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-emerald-500 px-2.5 py-0.5 text-xs font-semibold text-white">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      VPN Exit Verified
-                    </span>
-                  ) : (
+                {(() => {
+                  if (loading && hasSelectedCity) return <Skeleton className="h-6 w-36" />;
+                  if (!hasSelectedCity) return null;
+                  if (vpnLocationMatch) {
+                    return (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-emerald-500 px-2.5 py-0.5 text-xs font-semibold text-white">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        VPN Exit Verified
+                      </span>
+                    );
+                  }
+                  return (
                     <span className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-red-500 px-2.5 py-0.5 text-xs font-semibold text-white animate-pulse">
                       <AlertTriangle className="w-3.5 h-3.5" />
                       Location Mismatch
                     </span>
-                  )
-                ) : null}
+                  );
+                })()}
               </div>
             </CardContent>
           </Card>
