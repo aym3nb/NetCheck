@@ -1,10 +1,13 @@
-import { RefreshCw, Wifi, Shield, Globe, Activity, Clock } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
+import type { NextDnsInfo, DnsLeakInfo, AuditEntry } from "@/hooks/useNetDiagnostics";
+import { cn } from "@/lib/utils";
 
 function DataRow({ label, value, loading }: { label: string; value?: string | null; loading: boolean }) {
   return (
@@ -19,14 +22,79 @@ function DataRow({ label, value, loading }: { label: string; value?: string | nu
   );
 }
 
-export function Dashboard() {
-  const { ipInfo, nextDns, dnsLeak, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh } =
-    useNetDiagnostics();
+function StatusBadge({ status, loading }: { status: NextDnsInfo["status"] | "leak" | "clean" | null; loading: boolean }) {
+  if (loading) return <Skeleton className="h-5 w-16" />;
 
-  const formatTime = (date: Date | null) => {
-    if (!date) return null;
-    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const variants: Record<string, { label: string; className: string }> = {
+    ok: { label: "Active", className: "bg-emerald-500 text-white border-transparent" },
+    "not-using": { label: "Inactive", className: "bg-secondary text-secondary-foreground border-transparent" },
+    blocked: { label: "Blocked", className: "bg-red-500 text-white border-transparent animate-pulse" },
+    error: { label: "Error", className: "bg-red-500 text-white border-transparent animate-pulse" },
+    loading: { label: "Loading…", className: "bg-secondary text-secondary-foreground border-transparent" },
+    leak: { label: "Possible Leak", className: "bg-yellow-500 text-white border-transparent animate-pulse" },
+    clean: { label: "No Leak", className: "bg-emerald-500 text-white border-transparent" },
   };
+
+  const cfg = variants[status ?? "not-using"] ?? variants["not-using"];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold",
+        cfg.className
+      )}
+    >
+      {cfg.label}
+    </span>
+  );
+}
+
+function NextDnsIcon({ status, loading }: { status: NextDnsInfo["status"]; loading: boolean }) {
+  if (loading) return <ShieldCheck className="w-4 h-4 text-muted-foreground animate-pulse" />;
+  if (status === "ok") return <ShieldCheck className="w-4 h-4 text-emerald-500" />;
+  if (status === "blocked") return <ShieldX className="w-4 h-4 text-red-500 animate-pulse" />;
+  return <ShieldX className="w-4 h-4 text-muted-foreground" />;
+}
+
+function LeakIcon({ leak, loading }: { leak: DnsLeakInfo | null; loading: boolean }) {
+  if (loading) return <Lock className="w-4 h-4 text-muted-foreground animate-pulse" />;
+  if (!leak) return <Lock className="w-4 h-4 text-muted-foreground" />;
+  return leak.isSameAsPublic ? (
+    <ShieldX className="w-4 h-4 text-yellow-500" />
+  ) : (
+    <ShieldCheck className="w-4 h-4 text-emerald-500" />
+  );
+}
+
+function AuditLog({ entries }: { entries: AuditEntry[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <Card className="shadow-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Clock className="w-4 h-4 text-slate-400" />
+          Audit Log
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <ScrollArea className="h-48 px-6 pb-4">
+          <div className="space-y-1 font-mono text-xs">
+            {entries.map((entry, i) => (
+              <div key={i} className="flex gap-2 text-muted-foreground">
+                <span className="text-slate-400 flex-shrink-0">{entry.timestamp}</span>
+                <span className="text-foreground font-medium flex-shrink-0">{entry.event}</span>
+                <span className="truncate">{entry.statusCode}</span>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function Dashboard() {
+  const { ipInfo, nextDns, dnsLeak, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
+    useNetDiagnostics();
 
   const getPingLabel = (ms: number | null) => {
     if (ms === null) return "—";
@@ -54,7 +122,7 @@ export function Dashboard() {
             {lastUpdated && (
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock className="w-3.5 h-3.5" />
-                <span>{formatTime(lastUpdated)}</span>
+                <span>{lastUpdated.toISOString().replace("T", " ").substring(0, 19)} UTC</span>
               </div>
             )}
             <div className="flex items-center gap-2">
@@ -69,7 +137,7 @@ export function Dashboard() {
               </label>
             </div>
             <Button size="sm" variant="outline" onClick={refresh} disabled={loading} className="gap-2">
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
               <span className="hidden sm:inline">Refresh</span>
             </Button>
           </div>
@@ -77,7 +145,21 @@ export function Dashboard() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+        {/* Network Topology */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Activity className="w-4 h-4 text-slate-400" />
+              Network Path
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <NetworkTopology nextDns={nextDns} dnsLeak={dnsLeak} ipInfo={ipInfo} loading={loading} />
+          </CardContent>
+        </Card>
+
+        {/* Diagnostic Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Public Identity Card */}
           <Card className="shadow-sm">
@@ -104,21 +186,22 @@ export function Dashboard() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-base">
                 <span className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-purple-500" />
+                  <NextDnsIcon status={nextDns.status} loading={loading} />
                   NextDNS Status
                 </span>
-                {!loading && (
-                  <Badge variant={nextDns.status === "ok" ? "success" : "secondary"}>
-                    {nextDns.status === "ok" ? "Active" : "Inactive"}
-                  </Badge>
-                )}
-                {loading && <Skeleton className="h-5 w-16" />}
+                <StatusBadge status={nextDns.status} loading={loading} />
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-0">
               <DataRow
                 label="Status"
-                value={nextDns.status === "ok" ? "✓ Using NextDNS" : "✗ Not using NextDNS"}
+                value={
+                  nextDns.status === "ok"
+                    ? "✓ Using NextDNS"
+                    : nextDns.status === "blocked"
+                      ? "⊘ Blocked / Firewalled"
+                      : "✗ Not using NextDNS"
+                }
                 loading={loading}
               />
               <DataRow label="Config ID" value={nextDns.configId || "—"} loading={loading} />
@@ -132,15 +215,10 @@ export function Dashboard() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-base">
                 <span className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-green-500" />
+                  <LeakIcon leak={dnsLeak} loading={loading} />
                   DNS Security
                 </span>
-                {!loading && dnsLeak && (
-                  <Badge variant={dnsLeak.isSameAsPublic ? "warning" : "success"}>
-                    {dnsLeak.isSameAsPublic ? "Possible Leak" : "No Leak"}
-                  </Badge>
-                )}
-                {loading && <Skeleton className="h-5 w-20" />}
+                <StatusBadge status={loading ? null : dnsLeak?.isSameAsPublic ? "leak" : "clean"} loading={loading} />
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-0">
@@ -188,7 +266,10 @@ export function Dashboard() {
           </Card>
         </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-8">
+        {/* Audit Log */}
+        <AuditLog entries={auditLog} />
+
+        <p className="text-center text-xs text-muted-foreground">
           Data fetched from ipapi.co, test.nextdns.io, and edns.ip-api.com — All requests made client-side
         </p>
       </main>

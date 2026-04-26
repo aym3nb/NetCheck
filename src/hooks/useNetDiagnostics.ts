@@ -13,7 +13,7 @@ export interface IpInfo {
 }
 
 export interface NextDnsInfo {
-  status: "ok" | "not-using" | "error" | "loading";
+  status: "ok" | "not-using" | "blocked" | "error" | "loading";
   configId?: string;
   protocol?: string;
   server?: string;
@@ -30,6 +30,12 @@ export interface LatencyInfo {
   connectionType: string;
 }
 
+export interface AuditEntry {
+  timestamp: string; // ISO 8601
+  event: string;
+  statusCode: string;
+}
+
 export interface DiagnosticState {
   ipInfo: IpInfo | null;
   nextDns: NextDnsInfo;
@@ -38,6 +44,23 @@ export interface DiagnosticState {
   loading: boolean;
   lastUpdated: Date | null;
   error: string | null;
+  auditLog: AuditEntry[];
+}
+
+const FETCH_TIMEOUT_MS = 5000;
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function measureLatency(): Promise<number> {
@@ -65,6 +88,22 @@ function getConnectionType(): string {
   return conn.effectiveType || conn.type || "Unknown";
 }
 
+function isCorsOrNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("networkerror") ||
+    msg.includes("cors") ||
+    msg.includes("load") ||
+    err.name === "AbortError"
+  );
+}
+
+function makeEntry(event: string, statusCode: string): AuditEntry {
+  return { timestamp: new Date().toISOString(), event, statusCode };
+}
+
 export function useNetDiagnostics(autoRefreshInterval = 60000) {
   const [state, setState] = useState<DiagnosticState>({
     ipInfo: null,
@@ -74,74 +113,89 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
     loading: true,
     lastUpdated: null,
     error: null,
+    auditLog: [],
   });
   const [autoRefresh, setAutoRefresh] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const runDiagnostics = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
+    const newEntries: AuditEntry[] = [];
 
+    // --- IP Info ---
+    let ipInfo: IpInfo | null = null;
     try {
-      const [ipResult, nextDnsResult, dnsLeakResult, pingMs] = await Promise.allSettled([
-        fetch("https://ipapi.co/json/").then((r) => r.json()),
-        fetch("https://test.nextdns.io/").then((r) => r.json()),
-        fetch("https://edns.ip-api.com/json").then((r) => r.json()),
-        measureLatency(),
-      ]);
+      const resp = await fetchWithTimeout("https://ipapi.co/json/");
+      ipInfo = (await resp.json()) as IpInfo;
+      newEntries.push(makeEntry("IP Lookup", "200 OK"));
+    } catch (err) {
+      const code = isCorsOrNetworkError(err) ? "Blocked/Firewalled" : (err instanceof Error ? err.message : "ERR");
+      newEntries.push(makeEntry("IP Lookup", code));
+    }
 
-      let ipInfo: IpInfo | null = null;
-      if (ipResult.status === "fulfilled") {
-        ipInfo = ipResult.value as IpInfo;
-      }
-
-      let nextDns: NextDnsInfo = { status: "not-using" };
-      if (nextDnsResult.status === "fulfilled") {
-        const data = nextDnsResult.value;
-        if (data && data.status === "ok") {
-          nextDns = {
-            status: "ok",
-            configId: data.configId,
-            protocol: data.protocol,
-            server: data.server,
-          };
-        } else {
-          nextDns = { status: "not-using" };
-        }
+    // --- NextDNS ---
+    let nextDns: NextDnsInfo = { status: "not-using" };
+    try {
+      const resp = await fetchWithTimeout("https://test.nextdns.io/");
+      const data = await resp.json();
+      if (data && data.status === "ok") {
+        nextDns = { status: "ok", configId: data.configId, protocol: data.protocol, server: data.server };
+        newEntries.push(makeEntry("NextDNS Check", "200 OK — Linked"));
       } else {
         nextDns = { status: "not-using" };
+        newEntries.push(makeEntry("NextDNS Check", "200 OK — Not linked"));
       }
-
-      let dnsLeak: DnsLeakInfo | null = null;
-      if (dnsLeakResult.status === "fulfilled") {
-        const data = dnsLeakResult.value;
-        if (data && data.dns) {
-          dnsLeak = {
-            ip: data.dns.ip || "Unknown",
-            geo: data.dns.geo || "Unknown",
-            isSameAsPublic: ipInfo ? data.dns.ip === ipInfo.ip : false,
-          };
-        }
-      }
-
-      const latencyMs = pingMs.status === "fulfilled" ? pingMs.value : null;
-      const connectionType = getConnectionType();
-
-      setState({
-        ipInfo,
-        nextDns,
-        dnsLeak,
-        latency: { pingMs: latencyMs, connectionType },
-        loading: false,
-        lastUpdated: new Date(),
-        error: null,
-      });
     } catch (err) {
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error: err instanceof Error ? err.message : "Unknown error",
-      }));
+      if (isCorsOrNetworkError(err)) {
+        nextDns = { status: "blocked" };
+        newEntries.push(makeEntry("NextDNS Check", "Blocked/Firewalled"));
+      } else {
+        nextDns = { status: "not-using" };
+        newEntries.push(makeEntry("NextDNS Check", err instanceof Error ? err.message : "ERR"));
+      }
     }
+
+    // --- DNS Leak ---
+    let dnsLeak: DnsLeakInfo | null = null;
+    try {
+      const resp = await fetchWithTimeout("https://edns.ip-api.com/json");
+      const data = await resp.json();
+      if (data && data.dns) {
+        dnsLeak = {
+          ip: data.dns.ip || "Unknown",
+          geo: data.dns.geo || "Unknown",
+          isSameAsPublic: ipInfo ? data.dns.ip === ipInfo.ip : false,
+        };
+        newEntries.push(makeEntry("DNS Leak Test", dnsLeak.isSameAsPublic ? "200 OK — Possible Leak" : "200 OK — Clean"));
+      } else {
+        newEntries.push(makeEntry("DNS Leak Test", "200 OK — No Data"));
+      }
+    } catch (err) {
+      const code = isCorsOrNetworkError(err) ? "Blocked/Firewalled" : (err instanceof Error ? err.message : "ERR");
+      newEntries.push(makeEntry("DNS Leak Test", code));
+    }
+
+    // --- Latency ---
+    let pingMs: number | null = null;
+    try {
+      pingMs = await measureLatency();
+      newEntries.push(makeEntry("Latency Probe", `${pingMs} ms`));
+    } catch {
+      newEntries.push(makeEntry("Latency Probe", "ERR"));
+    }
+
+    const connectionType = getConnectionType();
+
+    setState((prev) => ({
+      ipInfo,
+      nextDns,
+      dnsLeak,
+      latency: { pingMs, connectionType },
+      loading: false,
+      lastUpdated: new Date(),
+      error: null,
+      auditLog: [...newEntries, ...prev.auditLog].slice(0, 100),
+    }));
   }, []);
 
   useEffect(() => {
