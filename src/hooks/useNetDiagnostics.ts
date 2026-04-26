@@ -177,10 +177,10 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       const data = await resp.json();
       if (data && data.status === "ok") {
         nextDns = { status: "ok", configId: data.configId, protocol: data.protocol, server: data.server };
-        newEntries.push(makeEntry("NextDNS Check", "200 OK — Linked"));
+        newEntries.push(makeEntry("NextDNS Check", "OK"));
       } else {
         nextDns = { status: "not-using" };
-        newEntries.push(makeEntry("NextDNS Check", "200 OK — Not Configured"));
+        newEntries.push(makeEntry("NextDNS Check", "Not Configured"));
       }
     } catch {
       // Proxy failed; attempt no-cors fallback
@@ -189,7 +189,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
         if (fallbackResp.type === "opaque") {
           // Server is reachable but we can't read the response body — manual verification required
           nextDns = { status: "manual" };
-          newEntries.push(makeEntry("NextDNS Check", "Reachable — Manual Check Required"));
+          newEntries.push(makeEntry("NextDNS Check", "Manual Check Required"));
         } else {
           nextDns = { status: "not-using" };
           newEntries.push(makeEntry("NextDNS Check", "Not Configured"));
@@ -276,15 +276,15 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
           makeEntry(
             "DNS Leak Test",
             dnsLeakAllSecure
-              ? `${dnsLeakEntries.length} resolvers — All NextDNS`
+              ? `${dnsLeakEntries.length} resolvers, all NextDNS`
               : `${dnsLeakEntries.filter((e) => e.status === "leak").length}/${dnsLeakEntries.length} leaking`
           )
         );
       } else {
-        newEntries.push(makeEntry("DNS Leak Test", "200 OK — No Resolvers"));
+        newEntries.push(makeEntry("DNS Leak Test", "No Resolvers"));
       }
     } catch {
-      newEntries.push(makeEntry("DNS Leak Test", "Unavailable — Use external test"));
+      newEntries.push(makeEntry("DNS Leak Test", "Unavailable"));
     }
 
     // --- Primary DNS Resolver Info (ip-api.com) — always runs ---
@@ -300,7 +300,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
         };
         newEntries.push(makeEntry("DNS Resolver Info", "200 OK"));
       } else {
-        newEntries.push(makeEntry("DNS Resolver Info", "200 OK — No Data"));
+        newEntries.push(makeEntry("DNS Resolver Info", "No Data"));
       }
     } catch (err) {
       const code = isCorsOrNetworkError(err) ? "Blocked/Firewalled" : (err instanceof Error ? err.message : "ERR");
