@@ -83,7 +83,7 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
     );
   }
 
-  const validEntries = entries.filter((e) => e.ip && e.ip !== "Unknown");
+  const validEntries = entries.filter((e) => e.ip);
 
   if (validEntries.length === 0) {
     return <p className="text-sm text-muted-foreground py-2">No resolver data available.</p>;
@@ -130,9 +130,9 @@ function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]
                 {entry.countryCode && (
                   <span className="mr-1.5">{countryCodeToFlag(entry.countryCode)}</span>
                 )}
-                {entry.country && entry.country !== "Unknown" ? entry.country : null}
+                {entry.country || null}
               </TableCell>
-              <TableCell className="text-xs max-w-[180px] truncate">{entry.isp || null}</TableCell>
+              <TableCell className="text-xs max-w-[180px] truncate">{entry.isp || ""}</TableCell>
               <TableCell className="text-right">
                 {entry.status === "secure" ? (
                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
