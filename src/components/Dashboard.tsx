@@ -157,6 +157,7 @@ export function Dashboard() {
               variant="outline"
               onClick={toggleTheme}
               aria-label="Toggle dark mode"
+              aria-pressed={theme === "dark"}
               className="w-9 px-0"
             >
               {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}

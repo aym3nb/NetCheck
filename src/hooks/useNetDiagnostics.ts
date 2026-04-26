@@ -154,8 +154,13 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
         try {
           const dohResp = await fetchWithTimeout("https://dns.nextdns.io/resolve?name=test.nextdns.io", { mode: "cors" });
           const dohData = await dohResp.json();
-          // A valid DoH response includes a 'Status' field (0 = NOERROR) and an 'Answer' array
-          if (typeof dohData === "object" && dohData !== null && "Status" in dohData) {
+          // A valid DoH response includes a numeric 'Status' field (0 = NOERROR) and may include an 'Answer' array
+          if (
+            typeof dohData === "object" &&
+            dohData !== null &&
+            "Status" in dohData &&
+            typeof dohData.Status === "number"
+          ) {
             // DoH endpoint is reachable → the block is at the CORS/browser level
             blockReason = "cors";
           }
