@@ -1,24 +1,27 @@
-import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Lock, Sun, Moon, AlertTriangle, ExternalLink } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
 import { useTheme } from "@/hooks/useTheme";
-import type { NextDnsInfo, DnsLeakInfo, DnsLeakEntry, AuditEntry, DnsResolverInfo } from "@/hooks/useNetDiagnostics";
+import type { NextDnsInfo, DnsLeakInfo, AuditEntry } from "@/hooks/useNetDiagnostics";
 import { cn } from "@/lib/utils";
 
+// Placeholder values that should be treated as absent data (hide the row entirely)
+const PLACEHOLDER_VALUES = new Set(["Unknown", "—", "Basic", ""]);
+
 function DataRow({ label, value, loading }: { label: string; value?: string | null; loading: boolean }) {
+  if (!loading && (value == null || PLACEHOLDER_VALUES.has(value))) return null;
   return (
     <div className="flex items-start justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
       <span className="text-sm text-muted-foreground flex-shrink-0">{label}</span>
       {loading ? (
         <Skeleton className="h-4 w-32" />
       ) : (
-        <span className="text-sm font-medium text-right break-all">{value || "—"}</span>
+        <span className="text-sm font-medium text-right break-all">{value}</span>
       )}
     </div>
   );
@@ -60,125 +63,13 @@ function NextDnsIcon({ status, loading }: { status: NextDnsInfo["status"]; loadi
 }
 
 function LeakIcon({ leak, loading }: { leak: DnsLeakInfo | null; loading: boolean }) {
-  if (loading) return <Lock className="w-4 h-4 text-muted-foreground animate-pulse" />;
-  if (!leak) return <Lock className="w-4 h-4 text-muted-foreground" />;
+  if (loading) return <ShieldCheck className="w-4 h-4 text-muted-foreground animate-pulse" />;
+  if (!leak) return <ShieldCheck className="w-4 h-4 text-muted-foreground" />;
   return leak.isSameAsPublic ? (
     <ShieldX className="w-4 h-4 text-yellow-500" />
   ) : (
     <ShieldCheck className="w-4 h-4 text-emerald-500" />
   );
-}
-
-function DnsLeakTable({ entries, allSecure, loading }: { entries: DnsLeakEntry[]; allSecure: boolean | null; loading: boolean }) {
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-8 w-full" />
-        ))}
-      </div>
-    );
-  }
-
-  if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground py-2">No resolver data available.</p>;
-  }
-
-  return (
-    <div className="space-y-3">
-      {/* Master validation banner */}
-      {allSecure === true && (
-        <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
-          <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Secure: No Leaks Detected</p>
-            <p className="text-xs text-muted-foreground">All {entries.length} resolver(s) confirmed NextDNS infrastructure</p>
-          </div>
-        </div>
-      )}
-      {allSecure === false && (
-        <div className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3">
-          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-red-600 dark:text-red-400">DNS Leak Detected</p>
-            <p className="text-xs text-muted-foreground">
-              {entries.filter((e) => e.status === "leak").length} of {entries.length} resolver(s) are not NextDNS
-            </p>
-          </div>
-        </div>
-      )}
-
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>IP Address</TableHead>
-            <TableHead>Location</TableHead>
-            <TableHead>ISP / Organization</TableHead>
-            <TableHead className="text-right">Status</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {entries.map((entry) => (
-            <TableRow key={entry.ip}>
-              <TableCell className="font-mono text-xs">{entry.ip}</TableCell>
-              <TableCell className="text-xs">
-                {entry.countryCode && (
-                  <span className="mr-1.5">{countryCodeToFlag(entry.countryCode)}</span>
-                )}
-                {entry.country}
-              </TableCell>
-              <TableCell className="text-xs max-w-[180px] truncate">{entry.isp || "—"}</TableCell>
-              <TableCell className="text-right">
-                {entry.status === "secure" ? (
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    NextDNS
-                  </span>
-                ) : entry.status === "leak" ? (
-                  <span className="inline-flex items-center gap-1 rounded-md bg-red-500 px-2 py-0.5 text-xs font-semibold text-white">
-                    <AlertTriangle className="w-3 h-3" />
-                    LEAKING
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Unknown</span>
-                )}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
-function DnsResolverOverview({ resolverInfo, loading }: { resolverInfo: DnsResolverInfo | null; loading: boolean }) {
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        <Skeleton className="h-4 w-48" />
-        <Skeleton className="h-4 w-64" />
-      </div>
-    );
-  }
-  if (!resolverInfo) {
-    return <p className="text-sm text-muted-foreground py-1">Resolver data unavailable.</p>;
-  }
-  return (
-    <div className="space-y-0">
-      <DataRow label="Resolver IP" value={resolverInfo.ip} loading={false} />
-      <DataRow label="Resolver ISP" value={resolverInfo.isp} loading={false} />
-      <DataRow label="Location" value={resolverInfo.geo} loading={false} />
-    </div>
-  );
-}
-
-function countryCodeToFlag(code: string): string {
-  if (!code || code.length !== 2) return "";
-  return code
-    .toUpperCase()
-    .split("")
-    .map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65))
-    .join("");
 }
 
 function AuditLog({ entries }: { entries: AuditEntry[] }) {
@@ -208,28 +99,19 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
   );
 }
 
-function getNextDnsStatusMessage(nextDns: NextDnsInfo): string {
-  if (nextDns.status === "ok") return "Using NextDNS";
-  if (nextDns.status === "manual") return "Reachable — Manual verification recommended";
-  if (nextDns.status === "blocked") {
-    return nextDns.blockReason === "cors"
-      ? "Browser / CORS Blocked"
-      : "Connection Blocked (Firewall)";
-  }
-  return "NextDNS Not Configured";
-}
-
 export function Dashboard() {
   const { ipInfo, nextDns, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, dnsResolverInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
 
-  const getPingLabel = (ms: number | null) => {
-    if (ms === null) return "—";
+  const getPingLabel = (ms: number | null): string | null => {
+    if (ms === null) return null;
     if (ms < 50) return `${ms} ms — Excellent`;
     if (ms < 150) return `${ms} ms — Good`;
     return `${ms} ms — Fair`;
   };
+
+  const validLeakEntries = dnsLeakEntries.filter((e) => e.ip);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -330,17 +212,7 @@ export function Dashboard() {
                 <StatusBadge status={nextDns.status} loading={loading} />
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-0">
-                <DataRow
-                  label="Status"
-                  value={getNextDnsStatusMessage(nextDns)}
-                  loading={loading}
-                />
-                <DataRow label="Config ID" value={nextDns.configId || "—"} loading={loading} />
-                <DataRow label="Protocol" value={nextDns.protocol || "—"} loading={loading} />
-                <DataRow label="Server" value={nextDns.server || "—"} loading={loading} />
-              </div>
+            <CardContent>
               <Button
                 variant="outline"
                 size="sm"
@@ -366,20 +238,36 @@ export function Dashboard() {
                 <StatusBadge status={loading ? null : dnsLeak?.isSameAsPublic ? "leak" : "clean"} loading={loading} />
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Primary resolver overview from ip-api.com */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Primary DNS Resolver</p>
-                <DnsResolverOverview resolverInfo={dnsResolverInfo} loading={loading} />
-              </div>
-
-              {/* Multi-resolver detail table (bash.ws) */}
-              {(loading || dnsLeakEntries.length > 0) && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Multi-Resolver Detail</p>
-                  <DnsLeakTable entries={dnsLeakEntries} allSecure={dnsLeakAllSecure} loading={loading} />
+            <CardContent className="space-y-3">
+              {/* Validation banner */}
+              {!loading && dnsLeakAllSecure === true && (
+                <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
+                  <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Secure: No Leaks Detected</p>
+                    <p className="text-xs text-muted-foreground">
+                      All {validLeakEntries.length} resolver(s) confirmed NextDNS infrastructure
+                    </p>
+                  </div>
                 </div>
               )}
+              {!loading && dnsLeakAllSecure === false && (
+                <div className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3">
+                  <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-600 dark:text-red-400">DNS Leak Detected</p>
+                    <p className="text-xs text-muted-foreground">
+                      {validLeakEntries.filter((e) => e.status === "leak").length} of{" "}
+                      {validLeakEntries.length} resolver(s) are not NextDNS
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Primary resolver IP */}
+              <div className="space-y-0">
+                <DataRow label="Primary Resolver" value={dnsResolverInfo?.ip} loading={loading} />
+              </div>
 
               {/* External test link */}
               <Button
@@ -406,20 +294,6 @@ export function Dashboard() {
             </CardHeader>
             <CardContent className="space-y-0">
               <DataRow label="Latency (to 1.1.1.1)" value={getPingLabel(latency.pingMs)} loading={loading} />
-              <DataRow label="Connection Type" value={latency.connectionType} loading={loading} />
-              <DataRow
-                label="Quality"
-                value={
-                  latency.pingMs !== null
-                    ? latency.pingMs < 50
-                      ? "Excellent"
-                      : latency.pingMs < 150
-                        ? "Good"
-                        : "Fair"
-                    : null
-                }
-                loading={loading}
-              />
             </CardContent>
           </Card>
         </div>
