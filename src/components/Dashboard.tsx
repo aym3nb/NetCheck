@@ -101,23 +101,29 @@ function LeakIcon({ leak, loading }: { leak: DnsLeakInfo | null; loading: boolea
 function resolverLabel(entry: DnsLeakEntry): string {
   const isp = entry.isp?.trim();
   if (isp && isp !== "Unknown") return isp;
-  if (entry.hostname?.trim()) return entry.hostname.trim();
+  const hostname = entry.hostname?.trim();
+  if (hostname) return hostname;
   return entry.ip;
 }
 
 function isNextDnsEntry(entry: DnsLeakEntry): boolean {
   return (
-    entry.isp.toLowerCase().includes("nextdns") ||
+    entry.isp?.toLowerCase().includes("nextdns") === true ||
     entry.hostname?.toLowerCase().includes("nextdns") === true
   );
 }
 
 function isCloudflareEntry(entry: DnsLeakEntry): boolean {
   return (
-    entry.isp.toLowerCase().includes("cloudflare") ||
+    entry.isp?.toLowerCase().includes("cloudflare") === true ||
     entry.hostname?.toLowerCase().includes("cloudflare") === true
   );
 }
+
+/** Delay before showing the NextDNS verification modal after opening the test page */
+const NEXTDNS_MODAL_DELAY_MS = 5000;
+/** Delay before showing the DNS leak verification modal after opening the test page */
+const DNS_LEAK_MODAL_DELAY_MS = 1000;
 
 function DnsResolverTable({ entries, loading }: { entries: DnsLeakEntry[]; loading: boolean }) {
   if (loading) {
@@ -600,7 +606,7 @@ export function Dashboard() {
                 className="w-full gap-2"
                 onClick={() => {
                   window.open("https://test.nextdns.io", "_blank", "noopener,noreferrer");
-                  setTimeout(() => setShowNextDnsModal(true), 5000);
+                  setTimeout(() => setShowNextDnsModal(true), NEXTDNS_MODAL_DELAY_MS);
                 }}
               >
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -665,7 +671,7 @@ export function Dashboard() {
                 className="w-full gap-2"
                 onClick={() => {
                   window.open("https://dnsleaktest.com", "_blank", "noopener,noreferrer");
-                  setTimeout(() => setShowDnsLeakModal(true), 1000);
+                  setTimeout(() => setShowDnsLeakModal(true), DNS_LEAK_MODAL_DELAY_MS);
                 }}
               >
                 <ExternalLink className="w-3.5 h-3.5" />

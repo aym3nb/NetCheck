@@ -20,7 +20,15 @@ function loadFromStorage(): PersistentAuditState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
-    return { ...DEFAULT_STATE, ...(JSON.parse(raw) as Partial<PersistentAuditState>) };
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return DEFAULT_STATE;
+    const p = parsed as Record<string, unknown>;
+    return {
+      isNextDNSVerified: typeof p.isNextDNSVerified === "boolean" ? p.isNextDNSVerified : DEFAULT_STATE.isNextDNSVerified,
+      isDNSLeakVerified: typeof p.isDNSLeakVerified === "boolean" ? p.isDNSLeakVerified : DEFAULT_STATE.isDNSLeakVerified,
+      hasDNSLeak: typeof p.hasDNSLeak === "boolean" ? p.hasDNSLeak : DEFAULT_STATE.hasDNSLeak,
+      lastAuditTimestamp: typeof p.lastAuditTimestamp === "string" ? p.lastAuditTimestamp : DEFAULT_STATE.lastAuditTimestamp,
+    };
   } catch {
     return DEFAULT_STATE;
   }
