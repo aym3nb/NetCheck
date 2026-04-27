@@ -14,38 +14,7 @@ export interface IpInfo {
   org: string;
 }
 
-export interface NextDnsInfo {
-  status: "ok" | "not-using" | "unconfigured" | "blocked" | "error" | "loading" | "manual";
-  configId?: string;
-  protocol?: string;
-  server?: string;
-  /** Extra detail when status is 'blocked': 'cors' means browser/CORS blocked; 'network' means firewall-level */
-  blockReason?: "cors" | "network";
-}
-
-export interface DnsLeakInfo {
-  ip: string;
-  geo: string;
-  isSameAsPublic: boolean;
-}
-
-export interface DnsResolverInfo {
-  ip: string;
-  isp: string;
-  geo: string;
-}
-
-export interface DnsLeakEntry {
-  ip: string;
-  country: string;
-  countryCode: string;
-  isp: string;
-  hostname?: string;
-  status: "secure" | "leak" | "unknown";
-}
-
-export interface LatencyInfo {
-  pingMs: number | null;
+export interface ConnectionInfo {
   connectionType: string;
 }
 
@@ -57,14 +26,7 @@ export interface AuditEntry {
 
 export interface DiagnosticState {
   ipInfo: IpInfo | null;
-  nextDns: NextDnsInfo;
-  /** True = no-cors ping to dns.nextdns.io succeeded (opaque response), False = network error */
-  nextDnsReachable: boolean | null;
-  dnsLeak: DnsLeakInfo | null;
-  dnsLeakEntries: DnsLeakEntry[];
-  dnsLeakAllSecure: boolean | null;
-  dnsResolverInfo: DnsResolverInfo | null;
-  latency: LatencyInfo;
+  latency: ConnectionInfo;
   loading: boolean;
   lastUpdated: Date | null;
   error: string | null;
@@ -89,13 +51,6 @@ interface BffIpInfoResponse {
   timezone?: string;
 }
 
-interface BffNextDnsResponse {
-  status?: string;
-  configId?: string;
-  protocol?: string;
-  server?: string;
-}
-
 async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -108,30 +63,6 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise
   } finally {
     clearTimeout(timer);
   }
-}
-
-async function fetchNoCorsWithTimeout(url: string, options: RequestInit = {}): Promise<void> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    await fetch(url, { ...options, mode: "no-cors", signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function measureLatency(): Promise<number> {
-  const start = performance.now();
-  try {
-    await fetch(`https://1.1.1.1/favicon.ico?_=${Date.now()}`, {
-      method: "HEAD",
-      mode: "no-cors",
-      cache: "no-store",
-    });
-  } catch {
-    // no-cors fetch may throw, but timing is still valid
-  }
-  return Math.round(performance.now() - start);
 }
 
 function getConnectionType(): string {
@@ -165,13 +96,7 @@ function makeEntry(event: string, statusCode: string, edgeLocation?: string | nu
 export function useNetDiagnostics(autoRefreshInterval = 60000) {
   const [state, setState] = useState<DiagnosticState>({
     ipInfo: null,
-    nextDns: { status: "loading" },
-    nextDnsReachable: null,
-    dnsLeak: null,
-    dnsLeakEntries: [],
-    dnsLeakAllSecure: null,
-    dnsResolverInfo: null,
-    latency: { pingMs: null, connectionType: "" },
+    latency: { connectionType: "" },
     loading: true,
     lastUpdated: null,
     error: null,
@@ -212,152 +137,11 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       newEntries.push(makeEntry("IP Lookup", code));
     }
 
-    // --- NextDNS (via BFF) ---
-    let nextDns: NextDnsInfo = { status: "not-using" };
-    try {
-      const resp = await fetchWithTimeout(`${BFF_URL}/nextdns`);
-      if (!edgeLocation) edgeLocation = resp.headers.get("X-NetCheck-Edge");
-      const data = await resp.json() as BffNextDnsResponse;
-      const bffStatus = data.status ?? "not-using";
-      if (bffStatus === "ok") {
-        nextDns = { status: "ok", configId: data.configId, protocol: data.protocol, server: data.server };
-        newEntries.push(makeEntry("NextDNS Check", "Active", edgeLocation));
-      } else if (bffStatus === "unconfigured") {
-        nextDns = { status: "unconfigured", configId: data.configId };
-        newEntries.push(makeEntry("NextDNS Check", "Linked (Unconfigured)", edgeLocation));
-      } else {
-        nextDns = { status: "not-using" };
-        newEntries.push(makeEntry("NextDNS Check", "Not Configured", edgeLocation));
-      }
-    } catch (err) {
-      const code = isCorsOrNetworkError(err) ? "BFF Unavailable" : (err instanceof Error ? err.message : "ERR");
-      nextDns = { status: "error" };
-      newEntries.push(makeEntry("NextDNS Check", code, edgeLocation));
-    }
-
-    // --- NextDNS reachability (no-cors ping) ---
-    // Regardless of BFF result, ping dns.nextdns.io directly; opaque success = reachable
-    let nextDnsReachable: boolean | null = null;
-    try {
-      await fetchNoCorsWithTimeout("https://dns.nextdns.io");
-      nextDnsReachable = true;
-      newEntries.push(makeEntry("NextDNS: Manual check link available", "Reachable", edgeLocation));
-    } catch {
-      nextDnsReachable = false;
-      newEntries.push(makeEntry("NextDNS: Manual check link available", "Unreachable", edgeLocation));
-    }
-
-    // --- DNS Leak (multi-resolver) ---
-    let dnsLeak: DnsLeakInfo | null = null;
-    let dnsLeakEntries: DnsLeakEntry[] = [];
-    let dnsLeakAllSecure: boolean | null = null;
-    try {
-      // Step 1: obtain a test ID from bash.ws
-      const idProxy = "https://corsproxy.io/?url=" + encodeURIComponent("https://bash.ws/dnsleak/id");
-      const idResp = await fetchWithTimeout(idProxy, { mode: "cors" });
-      const idData = await idResp.json();
-      const testId: string = idData?.id ?? idData;
-
-      // Step 2: fire 8 parallel no-cors fetches to unique subdomains to force DNS resolution
-      const PROBE_COUNT = 8;
-      const probes = Array.from({ length: PROBE_COUNT }, (_, i) =>
-        fetch(`https://${i}.${testId}.bash.ws/pixel.png`, { mode: "no-cors", cache: "no-store" }).catch(() => {})
-      );
-      await Promise.allSettled(probes);
-
-      // Small delay to allow DNS propagation to reach bash.ws servers
-      await new Promise((r) => setTimeout(r, 1500));
-
-      // Step 3: fetch results
-      const resultProxy = "https://corsproxy.io/?url=" + encodeURIComponent(`https://bash.ws/dnsleak/result/${testId}`);
-      const resultResp = await fetchWithTimeout(resultProxy, { mode: "cors" });
-      const resultData = await resultResp.json();
-
-      if (Array.isArray(resultData) && resultData.length > 0) {
-        dnsLeakEntries = resultData.map(
-          (r: { ip?: string; country?: string; country_code?: string; isp?: string; hostname?: string; type?: string }) => {
-            const isp = r.isp ?? "";
-            const hostname = r.hostname ?? "";
-            const isNextDns =
-              isp.toLowerCase().includes("nextdns") ||
-              isp.toLowerCase().includes("anexia") ||
-              hostname.toLowerCase().includes("nextdns");
-            return {
-              ip: r.ip ?? "",
-              country: r.country ?? "",
-              countryCode: r.country_code ?? "",
-              isp,
-              hostname,
-              status: isNextDns ? "secure" : "leak",
-            } satisfies DnsLeakEntry;
-          }
-        );
-
-        // Keep legacy single-entry shape for NetworkTopology compatibility
-        const first = dnsLeakEntries[0];
-        dnsLeak = {
-          ip: first.ip,
-          geo: `${first.country}`,
-          isSameAsPublic: dnsLeakEntries.some((e) => e.status === "leak"),
-        };
-
-        dnsLeakAllSecure = dnsLeakEntries.every((e) => e.status === "secure");
-        newEntries.push(
-          makeEntry(
-            "DNS Leak Test",
-            dnsLeakAllSecure
-              ? `${dnsLeakEntries.length} resolvers, all NextDNS`
-              : `${dnsLeakEntries.filter((e) => e.status === "leak").length}/${dnsLeakEntries.length} leaking`,
-            edgeLocation
-          )
-        );
-      } else {
-        newEntries.push(makeEntry("DNS Leak Test", "No Resolvers", edgeLocation));
-      }
-    } catch {
-      newEntries.push(makeEntry("DNS Leak Test", "Unavailable", edgeLocation));
-    }
-
-    // --- Primary DNS Resolver Info (ip-api.com) — always runs ---
-    let dnsResolverInfo: DnsResolverInfo | null = null;
-    try {
-      const resp = await fetchWithTimeout("https://edns.ip-api.com/json");
-      const data = await resp.json();
-      if (data && data.dns) {
-        dnsResolverInfo = {
-          ip: data.dns.ip || "",
-          isp: data.dns.isp || data.dns.org || "",
-          geo: data.dns.geo || "",
-        };
-        newEntries.push(makeEntry("DNS Resolver Info", "200 OK", edgeLocation));
-      } else {
-        newEntries.push(makeEntry("DNS Resolver Info", "No Data", edgeLocation));
-      }
-    } catch (err) {
-      const code = isCorsOrNetworkError(err) ? "Blocked/Firewalled" : (err instanceof Error ? err.message : "ERR");
-      newEntries.push(makeEntry("DNS Resolver Info", code, edgeLocation));
-    }
-
-    // --- Latency ---
-    let pingMs: number | null = null;
-    try {
-      pingMs = await measureLatency();
-      newEntries.push(makeEntry("Latency Probe", `${pingMs} ms`, edgeLocation));
-    } catch {
-      newEntries.push(makeEntry("Latency Probe", "ERR", edgeLocation));
-    }
-
     const connectionType = getConnectionType();
 
     setState((prev) => ({
       ipInfo,
-      nextDns,
-      nextDnsReachable,
-      dnsLeak,
-      dnsLeakEntries,
-      dnsLeakAllSecure,
-      dnsResolverInfo,
-      latency: { pingMs, connectionType },
+      latency: { connectionType },
       loading: false,
       lastUpdated: new Date(),
       error: null,
