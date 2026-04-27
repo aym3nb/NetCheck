@@ -102,9 +102,11 @@ async function fetchNoCorsWithTimeout(url: string, options: RequestInit = {}): P
 
 /** Measures a single round-trip ping to 1.1.1.1 using a no-cors HEAD request. */
 async function measureLatency(): Promise<number | null> {
+  // Build the cache-busting URL before starting the timer so only network time is measured
+  const url = `${PING_URL}?_=${Date.now()}`;
   const t0 = performance.now();
   try {
-    await fetchNoCorsWithTimeout(`${PING_URL}?_=${Date.now()}`, { method: "HEAD" });
+    await fetchNoCorsWithTimeout(url, { method: "HEAD" });
     return Math.round(performance.now() - t0);
   } catch {
     return null;
@@ -114,8 +116,8 @@ async function measureLatency(): Promise<number | null> {
 /**
  * Maps the raw navigator.connection fields to a human-readable label.
  * - 'wifi' type → "Wi-Fi"
- * - 'cellular' type with effectiveType '4g' → "4G", '5g' → "5G"
- * - anything else → "Ethernet/Wired" (common for OpenWRT desktop setups)
+ * - 'cellular' type: '5g' → "5G", '4g' → "4G", '3g' → "3G", otherwise "Cellular"
+ * - 'ethernet' or unknown → "Ethernet/Wired" (common for OpenWRT desktop setups)
  */
 function getConnectionType(): string {
   const nav = navigator as Navigator & {
@@ -132,7 +134,9 @@ function getConnectionType(): string {
   if (type === "wifi") return "Wi-Fi";
   if (type === "cellular") {
     if (effective === "5g") return "5G";
-    return "4G";
+    if (effective === "4g") return "4G";
+    if (effective === "3g") return "3G";
+    return "Cellular";
   }
   // ethernet, other, or unknown
   if (type === "ethernet") return "Ethernet/Wired";

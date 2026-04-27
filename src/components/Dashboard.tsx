@@ -400,10 +400,13 @@ export function Dashboard() {
                 </span>
                 {/* Tunnel badge — shown when a VPN or Proxy is detected */}
                 {!loading && tunnelType && (
-                  <span className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md border border-transparent px-2.5 py-0.5 text-xs font-semibold text-white",
-                    tunnelType === "VPN" ? "bg-purple-600" : "bg-amber-600"
-                  )}>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md border border-transparent px-2.5 py-0.5 text-xs font-semibold text-white",
+                      tunnelType === "VPN" ? "bg-purple-600" : "bg-amber-600"
+                    )}
+                    aria-label={`Tunnel type: ${tunnelType}`}
+                  >
                     <Shield className="w-3 h-3" />
                     Tunnel: {tunnelType}
                   </span>
@@ -438,7 +441,11 @@ export function Dashboard() {
                 {loading ? (
                   <Skeleton className="h-4 w-20" />
                 ) : (
-                  <span className="text-sm font-medium text-right flex items-center gap-1.5">
+                  <span
+                    className="text-sm font-medium text-right flex items-center gap-1.5"
+                    aria-live="polite"
+                    aria-label={latency.pingMs != null ? `Ping ${latency.pingMs} milliseconds` : "Ping unavailable"}
+                  >
                     {/* Pulse dot shows while a ping is in-flight */}
                     <span
                       className={cn(
