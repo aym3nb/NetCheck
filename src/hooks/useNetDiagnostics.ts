@@ -58,6 +58,8 @@ export interface AuditEntry {
 export interface DiagnosticState {
   ipInfo: IpInfo | null;
   nextDns: NextDnsInfo;
+  /** True = no-cors ping to dns.nextdns.io succeeded (opaque response), False = network error */
+  nextDnsReachable: boolean | null;
   dnsLeak: DnsLeakInfo | null;
   dnsLeakEntries: DnsLeakEntry[];
   dnsLeakAllSecure: boolean | null;
@@ -103,6 +105,16 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise
       throw new Error(`HTTP ${response.status}`);
     }
     return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchNoCorsWithTimeout(url: string, options: RequestInit = {}): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    await fetch(url, { ...options, mode: "no-cors", signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -154,6 +166,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
   const [state, setState] = useState<DiagnosticState>({
     ipInfo: null,
     nextDns: { status: "loading" },
+    nextDnsReachable: null,
     dnsLeak: null,
     dnsLeakEntries: [],
     dnsLeakAllSecure: null,
@@ -208,7 +221,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       const bffStatus = data.status ?? "not-using";
       if (bffStatus === "ok") {
         nextDns = { status: "ok", configId: data.configId, protocol: data.protocol, server: data.server };
-        newEntries.push(makeEntry("NextDNS Check", "OK", edgeLocation));
+        newEntries.push(makeEntry("NextDNS Check", "Active", edgeLocation));
       } else if (bffStatus === "unconfigured") {
         nextDns = { status: "unconfigured", configId: data.configId };
         newEntries.push(makeEntry("NextDNS Check", "Linked (Unconfigured)", edgeLocation));
@@ -220,6 +233,18 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       const code = isCorsOrNetworkError(err) ? "BFF Unavailable" : (err instanceof Error ? err.message : "ERR");
       nextDns = { status: "error" };
       newEntries.push(makeEntry("NextDNS Check", code, edgeLocation));
+    }
+
+    // --- NextDNS reachability (no-cors ping) ---
+    // Regardless of BFF result, ping dns.nextdns.io directly; opaque success = reachable
+    let nextDnsReachable: boolean | null = null;
+    try {
+      await fetchNoCorsWithTimeout("https://dns.nextdns.io");
+      nextDnsReachable = true;
+      newEntries.push(makeEntry("NextDNS: Manual check link available", "Reachable", edgeLocation));
+    } catch {
+      nextDnsReachable = false;
+      newEntries.push(makeEntry("NextDNS: Manual check link available", "Unreachable", edgeLocation));
     }
 
     // --- DNS Leak (multi-resolver) ---
@@ -327,6 +352,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
     setState((prev) => ({
       ipInfo,
       nextDns,
+      nextDnsReachable,
       dnsLeak,
       dnsLeakEntries,
       dnsLeakAllSecure,

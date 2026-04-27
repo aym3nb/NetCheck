@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink, MapPin } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink, MapPin, CheckCircle2, RotateCcw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
 import { useTheme } from "@/hooks/useTheme";
-import type { NextDnsInfo, DnsLeakInfo, AuditEntry } from "@/hooks/useNetDiagnostics";
+import { usePersistentAudit } from "@/hooks/usePersistentAudit";
+import type { NextDnsInfo, DnsLeakInfo, AuditEntry, DnsLeakEntry } from "@/hooks/useNetDiagnostics";
 import { cn } from "@/lib/utils";
 
 // Placeholder values that should be treated as absent data (hide the row entirely)
@@ -29,8 +31,25 @@ function DataRow({ label, value, loading }: { label: string; value?: string | nu
   );
 }
 
-function StatusBadge({ status, loading }: { status: NextDnsInfo["status"] | "leak" | "clean" | null; loading: boolean }) {
+function StatusBadge({
+  status,
+  loading,
+  verified,
+}: {
+  status: NextDnsInfo["status"] | "leak" | "clean" | "connected" | "disconnected" | null;
+  loading: boolean;
+  verified?: boolean;
+}) {
   if (loading) return <Skeleton className="h-5 w-16" />;
+
+  if (verified) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md border border-transparent bg-blue-600 px-2.5 py-0.5 text-xs font-semibold text-white">
+        <CheckCircle2 className="w-3 h-3" />
+        User Verified
+      </span>
+    );
+  }
 
   const variants: Record<string, { label: string; className: string }> = {
     ok: { label: "Active", className: "bg-emerald-500 text-white border-transparent" },
@@ -42,6 +61,8 @@ function StatusBadge({ status, loading }: { status: NextDnsInfo["status"] | "lea
     manual: { label: "Manual Check Required", className: "bg-yellow-500 text-white border-transparent" },
     leak: { label: "Possible Leak", className: "bg-yellow-500 text-white border-transparent animate-pulse" },
     clean: { label: "No Leak", className: "bg-emerald-500 text-white border-transparent" },
+    connected: { label: "Connected", className: "bg-emerald-500 text-white border-transparent" },
+    disconnected: { label: "Disconnected", className: "bg-secondary text-secondary-foreground border-transparent" },
   };
 
   const cfg = variants[status ?? "not-using"] ?? variants["not-using"];
@@ -76,6 +97,90 @@ function LeakIcon({ leak, loading }: { leak: DnsLeakInfo | null; loading: boolea
   );
 }
 
+/** Return a human-readable resolver label: ISP if valid, else hostname, else IP */
+function resolverLabel(entry: DnsLeakEntry): string {
+  const isp = entry.isp?.trim();
+  if (isp && isp !== "Unknown") return isp;
+  if (entry.hostname?.trim()) return entry.hostname.trim();
+  return entry.ip;
+}
+
+function isNextDnsEntry(entry: DnsLeakEntry): boolean {
+  return (
+    entry.isp.toLowerCase().includes("nextdns") ||
+    entry.hostname?.toLowerCase().includes("nextdns") === true
+  );
+}
+
+function isCloudflareEntry(entry: DnsLeakEntry): boolean {
+  return (
+    entry.isp.toLowerCase().includes("cloudflare") ||
+    entry.hostname?.toLowerCase().includes("cloudflare") === true
+  );
+}
+
+function DnsResolverTable({ entries, loading }: { entries: DnsLeakEntry[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="space-y-1.5">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex justify-between gap-4 py-1">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-4 w-20" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-border/40 overflow-hidden text-xs">
+      <div className="grid grid-cols-[1fr_auto_auto] bg-muted/40 px-3 py-1.5 font-medium text-muted-foreground">
+        <span>Resolver</span>
+        <span className="text-center px-2">Country</span>
+        <span className="text-right">Status</span>
+      </div>
+      {entries.map((entry, i) => {
+        const isNextDns = isNextDnsEntry(entry);
+        const isCloudflare = isCloudflareEntry(entry);
+        const isTrusted = isNextDns || isCloudflare;
+        return (
+          <div
+            key={i}
+            className={cn(
+              "grid grid-cols-[1fr_auto_auto] px-3 py-2 border-t border-border/30",
+              isNextDns && "bg-emerald-500/5",
+              isCloudflare && !isNextDns && "bg-orange-500/5"
+            )}
+          >
+            <span
+              className={cn(
+                "truncate font-medium",
+                isNextDns && "text-emerald-600 dark:text-emerald-400",
+                isCloudflare && !isNextDns && "text-orange-600 dark:text-orange-400"
+              )}
+            >
+              {resolverLabel(entry)}
+            </span>
+            <span className="px-2 text-center text-muted-foreground">{entry.country || "—"}</span>
+            <span className="text-right">
+              {isTrusted ? (
+                <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Secure
+                </span>
+              ) : (
+                <span className="text-yellow-600 dark:text-yellow-400">Leak</span>
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Major VPN exit-node cities for the location selector
 const VPN_CITIES = [
   "Amsterdam",
@@ -100,7 +205,7 @@ const VPN_CITIES = [
   "Zurich",
 ] as const;
 
-type AnonymityGrade = "A" | "C" | "F";
+type AnonymityGrade = "A" | "B" | "C" | "F";
 
 interface AnonymityScore {
   grade: AnonymityGrade;
@@ -113,23 +218,44 @@ function computeAnonymityScore({
   nextDnsOk,
   vpnLocationMatch,
   hasSelectedCity,
-  dnsLeakDetected,
+  isNextDNSVerified,
+  isDNSLeakVerified,
+  hasDNSLeak,
 }: {
   nextDnsOk: boolean;
   vpnLocationMatch: boolean;
   hasSelectedCity: boolean;
-  dnsLeakDetected: boolean;
+  isNextDNSVerified: boolean;
+  isDNSLeakVerified: boolean;
+  hasDNSLeak: boolean;
 }): AnonymityScore {
-  if (dnsLeakDetected || !nextDnsOk) {
+  // Manual verifications take priority
+  if (isDNSLeakVerified && hasDNSLeak) {
     return {
       grade: "F",
       label: "Grade F: Exposed",
-      description: dnsLeakDetected
-        ? "DNS leak detected — your resolver is visible to third parties."
-        : "NextDNS is not active — DNS queries are unencrypted.",
+      description: "You reported a potential DNS leak — your resolver may be visible to third parties.",
       colorClass: "text-red-500",
     };
   }
+  if (isNextDNSVerified && isDNSLeakVerified && hasSelectedCity && vpnLocationMatch) {
+    return {
+      grade: "A",
+      label: "Grade A: Fully Verified & Proxied",
+      description: "Manually verified: NextDNS active, no DNS leaks, and VPN exit node confirmed.",
+      colorClass: "text-emerald-500",
+    };
+  }
+  if (isNextDNSVerified && isDNSLeakVerified) {
+    return {
+      grade: "B",
+      label: "Grade B: Verified Secure",
+      description: "Manually verified: NextDNS active with no DNS leaks.",
+      colorClass: "text-blue-500",
+    };
+  }
+
+  // Automated scoring
   if (nextDnsOk && hasSelectedCity && vpnLocationMatch) {
     return {
       grade: "A",
@@ -138,25 +264,60 @@ function computeAnonymityScore({
       colorClass: "text-emerald-500",
     };
   }
-  // nextDNS active but no matched VPN city
+  if (nextDnsOk) {
+    // Grade B: NextDNS connected, no city selected or mismatch
+    if (!hasSelectedCity) {
+      return {
+        grade: "B",
+        label: "Grade B: DNS Encrypted",
+        description: "NextDNS is active. Set an expected VPN exit city to check location match.",
+        colorClass: "text-blue-500",
+      };
+    }
+    // NextDNS ok but city mismatch → Grade B still (NextDNS connected)
+    return {
+      grade: "B",
+      label: "Grade B: DNS Encrypted",
+      description: "NextDNS is active but your IP location doesn't match the expected VPN exit node.",
+      colorClass: "text-blue-500",
+    };
+  }
+  if (!nextDnsOk && hasSelectedCity && vpnLocationMatch) {
+    return {
+      grade: "C",
+      label: "Grade C: VPN Active, DNS Unencrypted",
+      description: "Your VPN exit node matches, but NextDNS is not active — DNS queries are unencrypted.",
+      colorClass: "text-yellow-500",
+    };
+  }
   return {
-    grade: "C",
-    label: "Grade C: Encrypted, No VPN Match",
-    description: hasSelectedCity
-      ? "NextDNS is active but your IP location doesn't match the expected VPN exit node."
-      : "NextDNS is active but no expected VPN location is set.",
-    colorClass: "text-yellow-500",
+    grade: "F",
+    label: "Grade F: Exposed",
+    description: "NextDNS is not active and no VPN location match — DNS queries are unencrypted.",
+    colorClass: "text-red-500",
   };
 }
 
-function AuditLog({ entries }: { entries: AuditEntry[] }) {
+function AuditLog({ entries, onReset }: { entries: AuditEntry[]; onReset: () => void }) {
   if (entries.length === 0) return null;
   return (
     <Card className="shadow-sm">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Clock className="w-4 h-4 text-slate-400" />
-          Audit Log
+        <CardTitle className="flex items-center justify-between text-base">
+          <span className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-slate-400" />
+            Audit Log
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1.5 text-xs text-muted-foreground"
+            onClick={onReset}
+            aria-label="Reset audit and clear verified state"
+          >
+            <RotateCcw className="w-3 h-3" />
+            Reset Audit
+          </Button>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
@@ -176,11 +337,21 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
   );
 }
 
+
 export function Dashboard() {
-  const { ipInfo, nextDns, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, dnsResolverInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
+  const { ipInfo, nextDns, nextDnsReachable, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, dnsResolverInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
   const [selectedCity, setSelectedCity] = useState<string>("");
+
+  // Persistent manual verification state
+  const { isNextDNSVerified, isDNSLeakVerified, hasDNSLeak, setNextDNSVerified, setDNSLeakVerified, resetAudit } =
+    usePersistentAudit();
+
+  // Modal state for NextDNS verification
+  const [showNextDnsModal, setShowNextDnsModal] = useState(false);
+  // Modal state for DNS leak verification
+  const [showDnsLeakModal, setShowDnsLeakModal] = useState(false);
 
   const getPingLabel = (ms: number | null): string | null => {
     if (ms === null) return null;
@@ -198,15 +369,27 @@ export function Dashboard() {
     ipInfo?.city != null &&
     ipInfo.city.localeCompare(selectedCity, undefined, { sensitivity: "base" }) === 0;
 
-  // Anonymity score — only computed once loading is done
-  const nextDnsOk = nextDns.status === "ok";
-  const dnsLeakDetected = dnsLeakAllSecure === false;
+  // Anonymity score — incorporates manual verifications
+  const nextDnsOk = nextDns.status === "ok" || nextDnsReachable === true;
   const anonymityScore = computeAnonymityScore({
     nextDnsOk,
     vpnLocationMatch,
     hasSelectedCity,
-    dnsLeakDetected,
+    isNextDNSVerified,
+    isDNSLeakVerified,
+    hasDNSLeak,
   });
+
+  // Derived badge status for NextDNS card
+  const nextDnsConnectStatus: "connected" | "disconnected" | null =
+    loading ? null : nextDnsReachable === true ? "connected" : "disconnected";
+
+  // DNS leak badge
+  const dnsLeakBadgeStatus: "leak" | "clean" | null = loading
+    ? null
+    : dnsLeak?.isSameAsPublic
+    ? "leak"
+    : "clean";
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -378,6 +561,20 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
+          {/* Network Performance Card — immediately after Public Identity */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Activity className="w-4 h-4 text-orange-500" />
+                Network Performance
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-0">
+              <DataRow label="Latency (to 1.1.1.1)" value={getPingLabel(latency.pingMs)} loading={loading} />
+              <DataRow label="Connection Type" value={latency.connectionType || null} loading={loading} />
+            </CardContent>
+          </Card>
+
           {/* NextDNS Status Card */}
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
@@ -386,20 +583,28 @@ export function Dashboard() {
                   <NextDnsIcon status={nextDns.status} loading={loading} />
                   NextDNS Status
                 </span>
-                <StatusBadge status={nextDns.status} loading={loading} />
+                <StatusBadge
+                  status={nextDnsConnectStatus}
+                  loading={loading}
+                  verified={isNextDNSVerified}
+                />
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-2">
+              <DataRow label="Config ID" value={nextDns.configId} loading={loading} />
+              <DataRow label="Protocol" value={nextDns.protocol} loading={loading} />
+              <DataRow label="Server" value={nextDns.server} loading={loading} />
               <Button
                 variant="outline"
                 size="sm"
                 className="w-full gap-2"
-                asChild
+                onClick={() => {
+                  window.open("https://test.nextdns.io", "_blank", "noopener,noreferrer");
+                  setTimeout(() => setShowNextDnsModal(true), 5000);
+                }}
               >
-                <a href="https://test.nextdns.io" target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Check Detailed Logs
-                </a>
+                <ExternalLink className="w-3.5 h-3.5" />
+                Check Detailed Logs
               </Button>
             </CardContent>
           </Card>
@@ -412,7 +617,11 @@ export function Dashboard() {
                   <LeakIcon leak={dnsLeak} loading={loading} />
                   DNS Leak Test
                 </span>
-                <StatusBadge status={loading ? null : dnsLeak?.isSameAsPublic ? "leak" : "clean"} loading={loading} />
+                <StatusBadge
+                  status={dnsLeakBadgeStatus}
+                  loading={loading}
+                  verified={isDNSLeakVerified && !hasDNSLeak}
+                />
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -441,6 +650,9 @@ export function Dashboard() {
                 </div>
               )}
 
+              {/* Resolver table */}
+              <DnsResolverTable entries={validLeakEntries} loading={loading} />
+
               {/* Primary resolver IP */}
               <div className="space-y-0">
                 <DataRow label="Primary Resolver" value={dnsResolverInfo?.ip} loading={loading} />
@@ -451,32 +663,20 @@ export function Dashboard() {
                 variant="outline"
                 size="sm"
                 className="w-full gap-2"
-                asChild
+                onClick={() => {
+                  window.open("https://dnsleaktest.com", "_blank", "noopener,noreferrer");
+                  setTimeout(() => setShowDnsLeakModal(true), 1000);
+                }}
               >
-                <a href="https://dnsleaktest.com" target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Launch Full DNS Leak Test
-                </a>
+                <ExternalLink className="w-3.5 h-3.5" />
+                Launch Full DNS Leak Test
               </Button>
-            </CardContent>
-          </Card>
-
-          {/* Network Performance Card */}
-          <Card className="shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Activity className="w-4 h-4 text-orange-500" />
-                Network Performance
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-0">
-              <DataRow label="Latency (to 1.1.1.1)" value={getPingLabel(latency.pingMs)} loading={loading} />
             </CardContent>
           </Card>
         </div>
 
         {/* Audit Log */}
-        <AuditLog entries={auditLog} />
+        <AuditLog entries={auditLog} onReset={resetAudit} />
 
         <p className="text-center text-xs text-muted-foreground">
           Diagnostics powered by NetCheck-BFF on Cloudflare Edge.{" "}
@@ -487,6 +687,81 @@ export function Dashboard() {
           .
         </p>
       </main>
+
+      {/* NextDNS Verification Modal */}
+      <Dialog open={showNextDnsModal} onOpenChange={setShowNextDnsModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-blue-500" />
+              Verify NextDNS Status
+            </DialogTitle>
+            <DialogDescription>
+              Did the NextDNS test page show <strong>"All Good"</strong> with your expected configuration?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => {
+                setNextDNSVerified(true);
+                setShowNextDnsModal(false);
+              }}
+            >
+              <CheckCircle2 className="w-4 h-4 mr-1.5" />
+              Yes — Mark Active
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => {
+                setNextDNSVerified(false);
+                setShowNextDnsModal(false);
+              }}
+            >
+              No — Mark Inactive
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DNS Leak Verification Modal */}
+      <Dialog open={showDnsLeakModal} onOpenChange={setShowDnsLeakModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-blue-500" />
+              Verify DNS Leak Test
+            </DialogTitle>
+            <DialogDescription>
+              On the test page, was NextDNS your <strong>only resolver</strong>? (Or do you trust every ISP shown?)
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => {
+                setDNSLeakVerified(true, false);
+                setShowDnsLeakModal(false);
+              }}
+            >
+              <CheckCircle2 className="w-4 h-4 mr-1.5" />
+              Verified — No Leaks
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto border-yellow-500 text-yellow-600 hover:bg-yellow-500/10"
+              onClick={() => {
+                setDNSLeakVerified(true, true);
+                setShowDnsLeakModal(false);
+              }}
+            >
+              <AlertTriangle className="w-4 h-4 mr-1.5" />
+              Unverified — Potential Leak
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
