@@ -34,6 +34,7 @@ function StatusBadge({ status, loading }: { status: NextDnsInfo["status"] | "lea
 
   const variants: Record<string, { label: string; className: string }> = {
     ok: { label: "Active", className: "bg-emerald-500 text-white border-transparent" },
+    unconfigured: { label: "Linked", className: "bg-blue-500 text-white border-transparent" },
     "not-using": { label: "Not Configured", className: "bg-secondary text-secondary-foreground border-transparent" },
     blocked: { label: "Blocked", className: "bg-red-500 text-white border-transparent animate-pulse" },
     error: { label: "Error", className: "bg-red-500 text-white border-transparent animate-pulse" },
@@ -59,6 +60,7 @@ function StatusBadge({ status, loading }: { status: NextDnsInfo["status"] | "lea
 function NextDnsIcon({ status, loading }: { status: NextDnsInfo["status"]; loading: boolean }) {
   if (loading) return <ShieldCheck className="w-4 h-4 text-muted-foreground animate-pulse" />;
   if (status === "ok") return <ShieldCheck className="w-4 h-4 text-emerald-500" />;
+  if (status === "unconfigured") return <ShieldCheck className="w-4 h-4 text-blue-500" />;
   if (status === "blocked") return <ShieldX className="w-4 h-4 text-red-500 animate-pulse" />;
   if (status === "manual") return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
   return <ShieldX className="w-4 h-4 text-muted-foreground" />;
@@ -477,7 +479,7 @@ export function Dashboard() {
         <AuditLog entries={auditLog} />
 
         <p className="text-center text-xs text-muted-foreground">
-          Data fetched from ipapi.co, test.nextdns.io, edns.ip-api.com, and bash.ws — All requests made client-side.{" "}
+          Diagnostics powered by NetCheck-BFF on Cloudflare Edge.{" "}
           Deep-packet diagnostics via{" "}
           <a href="https://dnsleaktest.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground transition-colors">
             dnsleaktest.com

@@ -24,18 +24,27 @@
 - [Lucide React](https://lucide.dev/) icons
 - [vite-plugin-pwa](https://vite-pwa-org.netlify.app/) for PWA support
 
+## Architecture
+
+NetCheck uses a **Backend-for-Frontend (BFF)** deployed as a Cloudflare Worker to handle cross-origin data aggregation and provide edge metadata. The frontend calls the BFF directly; the BFF in turn queries upstream APIs (ipapi.co, test.nextdns.io) server-side and returns normalised JSON with an `X-NetCheck-Edge` response header that identifies the Cloudflare edge location that served the request.
+
+- **BFF source**: [github.com/aym3nb/NetCheck-BFF](https://github.com/aym3nb/NetCheck-BFF)
+- **BFF worker**: `https://netcheck-bff.aym3nb-cf.workers.dev`
+
+> **Note**: Full IP and NextDNS diagnostics require the NetCheck-BFF to be reachable at `VITE_BFF_URL`. If the BFF is unavailable, those steps degrade gracefully to a "Service Unavailable" audit entry; DNS leak and latency tests continue to run client-side.
+
 ## Data Sources
 
-All requests are made client-side directly from the browser — no backend server is involved.
+The BFF (`https://netcheck-bff.aym3nb-cf.workers.dev`) aggregates upstream APIs on the edge. Direct client-side calls are still made for DNS leak probes and latency.
 
-| Source | Purpose |
-|---|---|
-| [ipapi.co](https://ipapi.co/) | Public IP, ISP, location, timezone — also used for VPN exit city verification |
-| [test.nextdns.io](https://test.nextdns.io/) via [corsproxy.io](https://corsproxy.io/) | NextDNS detection (config ID, protocol, server) |
-| [edns.ip-api.com](https://edns.ip-api.com/) | Primary DNS resolver IP, ISP, and location |
-| [bash.ws/dnsleak](https://bash.ws/) | Multi-resolver DNS leak detail (8 parallel probes) |
-| [1.1.1.1](https://1.1.1.1/) | Latency probe |
-| [dnsleaktest.com](https://dnsleaktest.com) | External Standard of Truth for deep-packet DNS diagnostics |
+| Source | Purpose | How accessed |
+|---|---|---|
+| [NetCheck-BFF](https://github.com/aym3nb/NetCheck-BFF) `/ip-info` | Public IP, ASN/org, location, timezone | Via BFF (Cloudflare Worker) |
+| [NetCheck-BFF](https://github.com/aym3nb/NetCheck-BFF) `/nextdns` | NextDNS status (ok / unconfigured / not-using) | Via BFF (Cloudflare Worker) |
+| [edns.ip-api.com](https://edns.ip-api.com/) | Primary DNS resolver IP, ISP, and location | Client-side |
+| [bash.ws/dnsleak](https://bash.ws/) | Multi-resolver DNS leak detail (8 parallel probes) | Client-side (`no-cors`) |
+| [1.1.1.1](https://1.1.1.1/) | Latency probe | Client-side (`no-cors`) |
+| [dnsleaktest.com](https://dnsleaktest.com) | External Standard of Truth for deep-packet DNS diagnostics | External link |
 
 ### VPN Exit City Verification
 
@@ -55,6 +64,12 @@ For comprehensive DNS leak analysis beyond what a browser-based tool can provide
 ## Development
 
 ```bash
+# 1. Copy the environment template (already committed for production)
+cp .env.production .env.local   # or create .env.local manually
+
+# .env.local contents:
+# VITE_BFF_URL=https://netcheck-bff.aym3nb-cf.workers.dev
+
 npm install
 npm run dev
 ```
