@@ -36,7 +36,7 @@ function StatusBadge({
   loading,
   verified,
 }: {
-  status: "ready" | "verified" | "leak" | null;
+  status: "ready" | "leak" | null;
   loading: boolean;
   verified?: boolean;
 }) {
@@ -59,7 +59,7 @@ function StatusBadge({
     );
   }
 
-  // Default: Ready (blue)
+  // Default (ready or null): Blue "Ready"
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-transparent bg-blue-500 px-2.5 py-0.5 text-xs font-semibold text-white">
       Ready
@@ -517,7 +517,7 @@ export function Dashboard() {
 
       {/* NextDNS Verification Modal */}
       <Dialog open={showNextDnsModal} onOpenChange={setShowNextDnsModal}>
-        <DialogContent className="max-w-sm w-full">
+        <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <ShieldCheck className="w-5 h-5 text-blue-500 flex-shrink-0" />
@@ -554,7 +554,7 @@ export function Dashboard() {
 
       {/* DNS Leak Verification Modal */}
       <Dialog open={showDnsLeakModal} onOpenChange={setShowDnsLeakModal}>
-        <DialogContent className="max-w-sm w-full">
+        <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <ShieldCheck className="w-5 h-5 text-blue-500 flex-shrink-0" />

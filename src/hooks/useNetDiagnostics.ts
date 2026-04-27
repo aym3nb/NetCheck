@@ -14,7 +14,7 @@ export interface IpInfo {
   org: string;
 }
 
-export interface LatencyInfo {
+export interface ConnectionInfo {
   connectionType: string;
 }
 
@@ -26,7 +26,7 @@ export interface AuditEntry {
 
 export interface DiagnosticState {
   ipInfo: IpInfo | null;
-  latency: LatencyInfo;
+  latency: ConnectionInfo;
   loading: boolean;
   lastUpdated: Date | null;
   error: string | null;
