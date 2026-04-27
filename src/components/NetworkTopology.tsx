@@ -1,10 +1,9 @@
 import { Laptop, Router, Server, Cloud, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { NextDnsInfo, DnsLeakInfo, IpInfo } from "@/hooks/useNetDiagnostics";
+import type { IpInfo } from "@/hooks/useNetDiagnostics";
 
 interface NetworkTopologyProps {
-  nextDns: NextDnsInfo;
-  dnsLeak: DnsLeakInfo | null;
+  nextDnsVerified: boolean;
   ipInfo: IpInfo | null;
   loading: boolean;
 }
@@ -60,9 +59,7 @@ function Connector({ color = "muted" }: ConnectorProps) {
   );
 }
 
-export function NetworkTopology({ nextDns, dnsLeak, ipInfo, loading }: NetworkTopologyProps) {
-  const nextDnsOk = nextDns.status === "ok";
-  const leakDetected = dnsLeak?.isSameAsPublic === true;
+export function NetworkTopology({ nextDnsVerified, ipInfo, loading }: NetworkTopologyProps) {
   const hasIp = ipInfo !== null;
 
   return (
@@ -75,24 +72,24 @@ export function NetworkTopology({ nextDns, dnsLeak, ipInfo, loading }: NetworkTo
         highlight="default"
       />
 
-      <Connector color={loading ? "muted" : nextDnsOk ? "blue" : "muted"} />
+      <Connector color={loading ? "muted" : nextDnsVerified ? "blue" : "muted"} />
 
       {/* Router */}
       <TopoNode
         icon={<Router className="w-5 h-5" />}
         label="Router"
         sublabel="Gateway"
-        highlight={loading ? "default" : leakDetected ? "yellow" : "default"}
+        highlight="default"
       />
 
-      <Connector color={loading ? "muted" : nextDnsOk ? "blue" : "muted"} />
+      <Connector color={loading ? "muted" : nextDnsVerified ? "blue" : "muted"} />
 
       {/* NextDNS Node */}
       <TopoNode
         icon={<Server className="w-5 h-5" />}
         label="NextDNS"
-        sublabel={nextDns.server || (nextDnsOk ? "Active" : "Bypassed")}
-        highlight={loading ? "default" : nextDnsOk ? "blue" : "default"}
+        sublabel={nextDnsVerified ? "Verified" : "Unverified"}
+        highlight={loading ? "default" : nextDnsVerified ? "blue" : "default"}
       />
 
       <Connector color={loading ? "muted" : hasIp ? "green" : "muted"} />

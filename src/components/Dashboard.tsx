@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RefreshCw, Wifi, ShieldCheck, ShieldX, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink, MapPin, CheckCircle2, RotateCcw } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink, MapPin, CheckCircle2, RotateCcw, Info } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -11,7 +11,7 @@ import { NetworkTopology } from "@/components/NetworkTopology";
 import { useNetDiagnostics } from "@/hooks/useNetDiagnostics";
 import { useTheme } from "@/hooks/useTheme";
 import { usePersistentAudit } from "@/hooks/usePersistentAudit";
-import type { NextDnsInfo, DnsLeakInfo, AuditEntry, DnsLeakEntry } from "@/hooks/useNetDiagnostics";
+import type { AuditEntry } from "@/hooks/useNetDiagnostics";
 import { cn } from "@/lib/utils";
 
 // Placeholder values that should be treated as absent data (hide the row entirely)
@@ -36,7 +36,7 @@ function StatusBadge({
   loading,
   verified,
 }: {
-  status: NextDnsInfo["status"] | "leak" | "clean" | "connected" | "disconnected" | null;
+  status: "ready" | "verified" | "leak" | null;
   loading: boolean;
   verified?: boolean;
 }) {
@@ -44,79 +44,26 @@ function StatusBadge({
 
   if (verified) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-transparent bg-blue-600 px-2.5 py-0.5 text-xs font-semibold text-white">
+      <span className="inline-flex items-center gap-1 rounded-md border border-transparent bg-emerald-600 px-2.5 py-0.5 text-xs font-semibold text-white">
         <CheckCircle2 className="w-3 h-3" />
         User Verified
       </span>
     );
   }
 
-  const variants: Record<string, { label: string; className: string }> = {
-    ok: { label: "Active", className: "bg-emerald-500 text-white border-transparent" },
-    unconfigured: { label: "Linked", className: "bg-blue-500 text-white border-transparent" },
-    "not-using": { label: "Not Configured", className: "bg-secondary text-secondary-foreground border-transparent" },
-    blocked: { label: "Blocked", className: "bg-red-500 text-white border-transparent animate-pulse" },
-    error: { label: "Error", className: "bg-red-500 text-white border-transparent animate-pulse" },
-    loading: { label: "Loading…", className: "bg-secondary text-secondary-foreground border-transparent" },
-    manual: { label: "Manual Check Required", className: "bg-yellow-500 text-white border-transparent" },
-    leak: { label: "Possible Leak", className: "bg-yellow-500 text-white border-transparent animate-pulse" },
-    clean: { label: "No Leak", className: "bg-emerald-500 text-white border-transparent" },
-    connected: { label: "Connected", className: "bg-emerald-500 text-white border-transparent" },
-    disconnected: { label: "Disconnected", className: "bg-secondary text-secondary-foreground border-transparent" },
-  };
+  if (status === "leak") {
+    return (
+      <span className="inline-flex items-center rounded-md border border-transparent bg-yellow-500 px-2.5 py-0.5 text-xs font-semibold text-white animate-pulse">
+        Potential Leak
+      </span>
+    );
+  }
 
-  const cfg = variants[status ?? "not-using"] ?? variants["not-using"];
+  // Default: Ready (blue)
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold",
-        cfg.className
-      )}
-    >
-      {cfg.label}
+    <span className="inline-flex items-center gap-1 rounded-md border border-transparent bg-blue-500 px-2.5 py-0.5 text-xs font-semibold text-white">
+      Ready
     </span>
-  );
-}
-
-function NextDnsIcon({ status, loading }: { status: NextDnsInfo["status"]; loading: boolean }) {
-  if (loading) return <ShieldCheck className="w-4 h-4 text-muted-foreground animate-pulse" />;
-  if (status === "ok") return <ShieldCheck className="w-4 h-4 text-emerald-500" />;
-  if (status === "unconfigured") return <ShieldCheck className="w-4 h-4 text-blue-500" />;
-  if (status === "blocked") return <ShieldX className="w-4 h-4 text-red-500 animate-pulse" />;
-  if (status === "manual") return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
-  return <ShieldX className="w-4 h-4 text-muted-foreground" />;
-}
-
-function LeakIcon({ leak, loading }: { leak: DnsLeakInfo | null; loading: boolean }) {
-  if (loading) return <ShieldCheck className="w-4 h-4 text-muted-foreground animate-pulse" />;
-  if (!leak) return <ShieldCheck className="w-4 h-4 text-muted-foreground" />;
-  return leak.isSameAsPublic ? (
-    <ShieldX className="w-4 h-4 text-yellow-500" />
-  ) : (
-    <ShieldCheck className="w-4 h-4 text-emerald-500" />
-  );
-}
-
-/** Return a human-readable resolver label: ISP if valid, else hostname, else IP */
-function resolverLabel(entry: DnsLeakEntry): string {
-  const isp = entry.isp?.trim();
-  if (isp && isp !== "Unknown") return isp;
-  const hostname = entry.hostname?.trim();
-  if (hostname) return hostname;
-  return entry.ip;
-}
-
-function isNextDnsEntry(entry: DnsLeakEntry): boolean {
-  return (
-    entry.isp?.toLowerCase().includes("nextdns") === true ||
-    entry.hostname?.toLowerCase().includes("nextdns") === true
-  );
-}
-
-function isCloudflareEntry(entry: DnsLeakEntry): boolean {
-  return (
-    entry.isp?.toLowerCase().includes("cloudflare") === true ||
-    entry.hostname?.toLowerCase().includes("cloudflare") === true
   );
 }
 
@@ -124,68 +71,6 @@ function isCloudflareEntry(entry: DnsLeakEntry): boolean {
 const NEXTDNS_MODAL_DELAY_MS = 5000;
 /** Delay before showing the DNS leak verification modal after opening the test page */
 const DNS_LEAK_MODAL_DELAY_MS = 1000;
-
-function DnsResolverTable({ entries, loading }: { entries: DnsLeakEntry[]; loading: boolean }) {
-  if (loading) {
-    return (
-      <div className="space-y-1.5">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="flex justify-between gap-4 py-1">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-4 w-20" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (entries.length === 0) return null;
-
-  return (
-    <div className="rounded-md border border-border/40 overflow-hidden text-xs">
-      <div className="grid grid-cols-[1fr_auto_auto] bg-muted/40 px-3 py-1.5 font-medium text-muted-foreground">
-        <span>Resolver</span>
-        <span className="text-center px-2">Country</span>
-        <span className="text-right">Status</span>
-      </div>
-      {entries.map((entry, i) => {
-        const isNextDns = isNextDnsEntry(entry);
-        const isCloudflare = isCloudflareEntry(entry);
-        const isTrusted = isNextDns || isCloudflare;
-        return (
-          <div
-            key={i}
-            className={cn(
-              "grid grid-cols-[1fr_auto_auto] px-3 py-2 border-t border-border/30",
-              isNextDns && "bg-emerald-500/5",
-              isCloudflare && !isNextDns && "bg-orange-500/5"
-            )}
-          >
-            <span
-              className={cn(
-                "truncate font-medium",
-                isNextDns && "text-emerald-600 dark:text-emerald-400",
-                isCloudflare && !isNextDns && "text-orange-600 dark:text-orange-400"
-              )}
-            >
-              {resolverLabel(entry)}
-            </span>
-            <span className="px-2 text-center text-muted-foreground">{entry.country || "—"}</span>
-            <span className="text-right">
-              {isTrusted ? (
-                <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Secure
-                </span>
-              ) : (
-                <span className="text-yellow-600 dark:text-yellow-400">Leak</span>
-              )}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // Major VPN exit-node cities for the location selector
 const VPN_CITIES = [
@@ -211,96 +96,76 @@ const VPN_CITIES = [
   "Zurich",
 ] as const;
 
-type AnonymityGrade = "A" | "B" | "C" | "F";
+type AnonymityGrade = "A" | "B" | "F" | "—";
 
 interface AnonymityScore {
   grade: AnonymityGrade;
   label: string;
   description: string;
   colorClass: string;
+  isPending: boolean;
 }
 
 function computeAnonymityScore({
-  nextDnsOk,
-  vpnLocationMatch,
-  hasSelectedCity,
   isNextDNSVerified,
   isDNSLeakVerified,
   hasDNSLeak,
 }: {
-  nextDnsOk: boolean;
-  vpnLocationMatch: boolean;
-  hasSelectedCity: boolean;
   isNextDNSVerified: boolean;
   isDNSLeakVerified: boolean;
   hasDNSLeak: boolean;
 }): AnonymityScore {
-  // Manual verifications take priority
+  // Neither audit completed → Pending
+  if (!isNextDNSVerified && !isDNSLeakVerified) {
+    return {
+      grade: "—",
+      label: "Score Pending",
+      description: "Complete the manual verifications below to calculate your anonymity grade.",
+      colorClass: "text-muted-foreground",
+      isPending: true,
+    };
+  }
+
+  // Reported a leak → F
   if (isDNSLeakVerified && hasDNSLeak) {
     return {
       grade: "F",
       label: "Grade F: Exposed",
       description: "You reported a potential DNS leak — your resolver may be visible to third parties.",
       colorClass: "text-red-500",
-    };
-  }
-  if (isNextDNSVerified && isDNSLeakVerified && hasSelectedCity && vpnLocationMatch) {
-    return {
-      grade: "A",
-      label: "Grade A: Fully Verified & Proxied",
-      description: "Manually verified: NextDNS active, no DNS leaks, and VPN exit node confirmed.",
-      colorClass: "text-emerald-500",
-    };
-  }
-  if (isNextDNSVerified && isDNSLeakVerified) {
-    return {
-      grade: "B",
-      label: "Grade B: Verified Secure",
-      description: "Manually verified: NextDNS active with no DNS leaks.",
-      colorClass: "text-blue-500",
+      isPending: false,
     };
   }
 
-  // Automated scoring
-  if (nextDnsOk && hasSelectedCity && vpnLocationMatch) {
+  // Both verified, no leak → A
+  if (isNextDNSVerified && isDNSLeakVerified) {
     return {
       grade: "A",
-      label: "Grade A: Fully Encrypted & Proxied",
-      description: "NextDNS is active, no DNS leaks, and your public IP matches the expected VPN exit node.",
+      label: "Grade A: Fully Verified",
+      description: "Manually verified: NextDNS active with no DNS leaks.",
       colorClass: "text-emerald-500",
+      isPending: false,
     };
   }
-  if (nextDnsOk) {
-    // Grade B: NextDNS connected, no city selected or mismatch
-    if (!hasSelectedCity) {
-      return {
-        grade: "B",
-        label: "Grade B: DNS Encrypted",
-        description: "NextDNS is active. Set an expected VPN exit city to check location match.",
-        colorClass: "text-blue-500",
-      };
-    }
-    // NextDNS ok but city mismatch → Grade B still (NextDNS connected)
+
+  // Only NextDNS verified → B
+  if (isNextDNSVerified) {
     return {
       grade: "B",
-      label: "Grade B: DNS Encrypted",
-      description: "NextDNS is active but your IP location doesn't match the expected VPN exit node.",
+      label: "Grade B: DNS Verified",
+      description: "NextDNS verified. Complete the DNS leak test to reach Grade A.",
       colorClass: "text-blue-500",
+      isPending: false,
     };
   }
-  if (!nextDnsOk && hasSelectedCity && vpnLocationMatch) {
-    return {
-      grade: "C",
-      label: "Grade C: VPN Active, DNS Unencrypted",
-      description: "Your VPN exit node matches, but NextDNS is not active — DNS queries are unencrypted.",
-      colorClass: "text-yellow-500",
-    };
-  }
+
+  // Only DNS leak verified (no leak) → B
   return {
-    grade: "F",
-    label: "Grade F: Exposed",
-    description: "NextDNS is not active and no VPN location match — DNS queries are unencrypted.",
-    colorClass: "text-red-500",
+    grade: "B",
+    label: "Grade B: Leak-Free",
+    description: "No DNS leaks detected. Verify NextDNS to reach Grade A.",
+    colorClass: "text-blue-500",
+    isPending: false,
   };
 }
 
@@ -345,7 +210,7 @@ function AuditLog({ entries, onReset }: { entries: AuditEntry[]; onReset: () => 
 
 
 export function Dashboard() {
-  const { ipInfo, nextDns, nextDnsReachable, dnsLeak, dnsLeakEntries, dnsLeakAllSecure, dnsResolverInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
+  const { ipInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
   const [selectedCity, setSelectedCity] = useState<string>("");
@@ -359,15 +224,6 @@ export function Dashboard() {
   // Modal state for DNS leak verification
   const [showDnsLeakModal, setShowDnsLeakModal] = useState(false);
 
-  const getPingLabel = (ms: number | null): string | null => {
-    if (ms === null) return null;
-    if (ms < 50) return `${ms} ms — Excellent`;
-    if (ms < 150) return `${ms} ms — Good`;
-    return `${ms} ms — Fair`;
-  };
-
-  const validLeakEntries = dnsLeakEntries.filter((e) => e.ip);
-
   // VPN location match — locale-aware, accent/case-insensitive comparison against the city from IP lookup
   const hasSelectedCity = selectedCity !== "";
   const vpnLocationMatch =
@@ -375,27 +231,12 @@ export function Dashboard() {
     ipInfo?.city != null &&
     ipInfo.city.localeCompare(selectedCity, undefined, { sensitivity: "base" }) === 0;
 
-  // Anonymity score — incorporates manual verifications
-  const nextDnsOk = nextDns.status === "ok" || nextDnsReachable === true;
+  // Anonymity score — manual-only, defaults to Pending
   const anonymityScore = computeAnonymityScore({
-    nextDnsOk,
-    vpnLocationMatch,
-    hasSelectedCity,
     isNextDNSVerified,
     isDNSLeakVerified,
     hasDNSLeak,
   });
-
-  // Derived badge status for NextDNS card
-  const nextDnsConnectStatus: "connected" | "disconnected" | null =
-    loading ? null : nextDnsReachable === true ? "connected" : "disconnected";
-
-  // DNS leak badge
-  const dnsLeakBadgeStatus: "leak" | "clean" | null = loading
-    ? null
-    : dnsLeak?.isSameAsPublic
-    ? "leak"
-    : "clean";
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -459,7 +300,7 @@ export function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <NetworkTopology nextDns={nextDns} dnsLeak={dnsLeak} ipInfo={ipInfo} loading={loading} />
+            <NetworkTopology nextDnsVerified={isNextDNSVerified} ipInfo={ipInfo} loading={loading} />
           </CardContent>
         </Card>
 
@@ -481,20 +322,32 @@ export function Dashboard() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-6">
-                <span
-                  className={cn(
-                    "text-6xl font-black leading-none select-none",
-                    anonymityScore.colorClass
-                  )}
-                  aria-label={`Anonymity grade ${anonymityScore.grade}`}
-                >
-                  {anonymityScore.grade}
-                </span>
-                <div>
-                  <p className="text-sm font-semibold">{anonymityScore.label}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{anonymityScore.description}</p>
+              <div className="space-y-3">
+                <div className="flex items-center gap-6">
+                  <span
+                    className={cn(
+                      "text-6xl font-black leading-none select-none",
+                      anonymityScore.colorClass
+                    )}
+                    aria-label={`Anonymity grade ${anonymityScore.grade}`}
+                  >
+                    {anonymityScore.grade}
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">{anonymityScore.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{anonymityScore.description}</p>
+                  </div>
                 </div>
+                {anonymityScore.isPending && (
+                  <div className="flex items-start gap-2 rounded-lg bg-muted/50 border border-border/60 px-3 py-2.5">
+                    <Info className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-muted-foreground">
+                      Your score will be calculated after you complete the{" "}
+                      <strong className="text-foreground">NextDNS</strong> and{" "}
+                      <strong className="text-foreground">DNS Security Audit</strong> verifications below.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -567,7 +420,7 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Network Performance Card — immediately after Public Identity */}
+          {/* Network Performance Card */}
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
@@ -576,7 +429,6 @@ export function Dashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-0">
-              <DataRow label="Latency (to 1.1.1.1)" value={getPingLabel(latency.pingMs)} loading={loading} />
               <DataRow label="Connection Type" value={latency.connectionType || null} loading={loading} />
             </CardContent>
           </Card>
@@ -586,20 +438,20 @@ export function Dashboard() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-base">
                 <span className="flex items-center gap-2">
-                  <NextDnsIcon status={nextDns.status} loading={loading} />
+                  <ShieldCheck className={cn("w-4 h-4", isNextDNSVerified ? "text-emerald-500" : "text-muted-foreground")} />
                   NextDNS Status
                 </span>
                 <StatusBadge
-                  status={nextDnsConnectStatus}
+                  status="ready"
                   loading={loading}
                   verified={isNextDNSVerified}
                 />
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <DataRow label="Config ID" value={nextDns.configId} loading={loading} />
-              <DataRow label="Protocol" value={nextDns.protocol} loading={loading} />
-              <DataRow label="Server" value={nextDns.server} loading={loading} />
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Open the NextDNS test page to confirm your DNS is routed through NextDNS. Then answer the prompt.
+              </p>
               <Button
                 variant="outline"
                 size="sm"
@@ -615,56 +467,25 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* DNS Leak Test Card */}
-          <Card className="shadow-sm md:col-span-2">
+          {/* DNS Security Audit Card */}
+          <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-base">
                 <span className="flex items-center gap-2">
-                  <LeakIcon leak={dnsLeak} loading={loading} />
-                  DNS Leak Test
+                  <ShieldCheck className={cn("w-4 h-4", isDNSLeakVerified && !hasDNSLeak ? "text-emerald-500" : "text-muted-foreground")} />
+                  DNS Security Audit
                 </span>
                 <StatusBadge
-                  status={dnsLeakBadgeStatus}
+                  status={isDNSLeakVerified && hasDNSLeak ? "leak" : "ready"}
                   loading={loading}
                   verified={isDNSLeakVerified && !hasDNSLeak}
                 />
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {/* Validation banner */}
-              {!loading && dnsLeakAllSecure === true && (
-                <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
-                  <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                  <div>
-                    <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Secure: No Leaks Detected</p>
-                    <p className="text-xs text-muted-foreground">
-                      All {validLeakEntries.length} resolver(s) confirmed NextDNS infrastructure
-                    </p>
-                  </div>
-                </div>
-              )}
-              {!loading && dnsLeakAllSecure === false && (
-                <div className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3">
-                  <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                  <div>
-                    <p className="text-sm font-semibold text-red-600 dark:text-red-400">DNS Leak Detected</p>
-                    <p className="text-xs text-muted-foreground">
-                      {validLeakEntries.filter((e) => e.status === "leak").length} of{" "}
-                      {validLeakEntries.length} resolver(s) are not NextDNS
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Resolver table */}
-              <DnsResolverTable entries={validLeakEntries} loading={loading} />
-
-              {/* Primary resolver IP */}
-              <div className="space-y-0">
-                <DataRow label="Primary Resolver" value={dnsResolverInfo?.ip} loading={loading} />
-              </div>
-
-              {/* External test link */}
+              <p className="text-sm text-muted-foreground">
+                Run a full DNS leak test on an external tool to verify no resolvers outside NextDNS are visible. Then answer the prompt.
+              </p>
               <Button
                 variant="outline"
                 size="sm"
@@ -696,13 +517,13 @@ export function Dashboard() {
 
       {/* NextDNS Verification Modal */}
       <Dialog open={showNextDnsModal} onOpenChange={setShowNextDnsModal}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm w-full">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-blue-500" />
-              Verify NextDNS Status
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="w-5 h-5 text-blue-500 flex-shrink-0" />
+              Did it work?
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-sm leading-relaxed break-words">
               Did the NextDNS test page show <strong>"All Good"</strong> with your expected configuration?
             </DialogDescription>
           </DialogHeader>
@@ -733,13 +554,13 @@ export function Dashboard() {
 
       {/* DNS Leak Verification Modal */}
       <Dialog open={showDnsLeakModal} onOpenChange={setShowDnsLeakModal}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm w-full">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-blue-500" />
-              Verify DNS Leak Test
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="w-5 h-5 text-blue-500 flex-shrink-0" />
+              Did it work?
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-sm leading-relaxed break-words">
               On the test page, was NextDNS your <strong>only resolver</strong>? (Or do you trust every ISP shown?)
             </DialogDescription>
           </DialogHeader>
