@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RefreshCw, Wifi, ShieldCheck, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink, MapPin, CheckCircle2, RotateCcw, Info } from "lucide-react";
+import { RefreshCw, Wifi, ShieldCheck, Globe, Activity, Clock, Sun, Moon, AlertTriangle, ExternalLink, MapPin, CheckCircle2, RotateCcw, Info, Ghost, Shield } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -96,7 +96,7 @@ const VPN_CITIES = [
   "Zurich",
 ] as const;
 
-type AnonymityGrade = "A" | "B" | "F" | "—";
+type AnonymityGrade = "A+" | "A" | "B" | "F" | "—";
 
 interface AnonymityScore {
   grade: AnonymityGrade;
@@ -110,10 +110,14 @@ function computeAnonymityScore({
   isNextDNSVerified,
   isDNSLeakVerified,
   hasDNSLeak,
+  isTor,
+  vpnLocationMatch,
 }: {
   isNextDNSVerified: boolean;
   isDNSLeakVerified: boolean;
   hasDNSLeak: boolean;
+  isTor: boolean;
+  vpnLocationMatch: boolean;
 }): AnonymityScore {
   // Neither audit completed → Pending
   if (!isNextDNSVerified && !isDNSLeakVerified) {
@@ -133,6 +137,21 @@ function computeAnonymityScore({
       label: "Grade F: Exposed",
       description: "You reported a potential DNS leak — your resolver may be visible to third parties.",
       colorClass: "text-red-500",
+      isPending: false,
+    };
+  }
+
+  // A+ (Ghost): Tor active, OR (NextDNS verified + DNS leak verified clean + VPN location match)
+  const ghostByTor = isTor && isDNSLeakVerified && !hasDNSLeak;
+  const ghostByVpnNextDns = isNextDNSVerified && isDNSLeakVerified && !hasDNSLeak && vpnLocationMatch;
+  if (ghostByTor || ghostByVpnNextDns) {
+    return {
+      grade: "A+",
+      label: "Grade A+: Ghost",
+      description: ghostByTor
+        ? "Tor connection detected with no DNS leaks — maximum anonymity."
+        : "NextDNS active, no DNS leaks, and VPN exit node verified — maximum anonymity.",
+      colorClass: "text-purple-500",
       isPending: false,
     };
   }
@@ -210,7 +229,7 @@ function AuditLog({ entries, onReset }: { entries: AuditEntry[]; onReset: () => 
 
 
 export function Dashboard() {
-  const { ipInfo, latency, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
+  const { ipInfo, latency, isTor, tunnelType, isPinging, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
   const [selectedCity, setSelectedCity] = useState<string>("");
@@ -236,6 +255,8 @@ export function Dashboard() {
     isNextDNSVerified,
     isDNSLeakVerified,
     hasDNSLeak,
+    isTor,
+    vpnLocationMatch,
   });
 
   return (
@@ -300,7 +321,14 @@ export function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <NetworkTopology nextDnsVerified={isNextDNSVerified} ipInfo={ipInfo} loading={loading} />
+            <NetworkTopology
+              nextDnsVerified={isNextDNSVerified}
+              ipInfo={ipInfo}
+              loading={loading}
+              connectionType={latency.connectionType}
+              isTor={isTor}
+              tunnelType={tunnelType}
+            />
           </CardContent>
         </Card>
 
@@ -324,15 +352,22 @@ export function Dashboard() {
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-6">
-                  <span
-                    className={cn(
-                      "text-6xl font-black leading-none select-none",
-                      anonymityScore.colorClass
-                    )}
-                    aria-label={`Anonymity grade ${anonymityScore.grade}`}
-                  >
-                    {anonymityScore.grade}
-                  </span>
+                  {anonymityScore.grade === "A+" ? (
+                    <Ghost
+                      className={cn("w-14 h-14 flex-shrink-0 transition-all duration-300", anonymityScore.colorClass)}
+                      aria-label="Anonymity grade A+ Ghost"
+                    />
+                  ) : (
+                    <span
+                      className={cn(
+                        "text-6xl font-black leading-none select-none",
+                        anonymityScore.colorClass
+                      )}
+                      aria-label={`Anonymity grade ${anonymityScore.grade}`}
+                    >
+                      {anonymityScore.grade}
+                    </span>
+                  )}
                   <div>
                     <p className="text-sm font-semibold">{anonymityScore.label}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{anonymityScore.description}</p>
@@ -355,28 +390,99 @@ export function Dashboard() {
 
         {/* Diagnostic Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Public Identity Card */}
+          {/* Public Identity Card — spans full height on wide screens (md:row-span-2) */}
+          <Card className="shadow-sm md:row-span-2">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-blue-500" />
+                  Public Identity
+                </span>
+                {/* Tunnel badge — shown when a VPN or Proxy is detected */}
+                {!loading && tunnelType && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md border border-transparent px-2.5 py-0.5 text-xs font-semibold text-white",
+                      tunnelType === "VPN" ? "bg-purple-600" : "bg-amber-600"
+                    )}
+                    aria-label={`Tunnel type: ${tunnelType}`}
+                  >
+                    <Shield className="w-3 h-3" />
+                    Tunnel: {tunnelType}
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-0">
+              <DataRow label="IP Address" value={ipInfo?.ip} loading={loading} />
+              <DataRow label="ISP / Org" value={ipInfo?.org || ipInfo?.isp} loading={loading} />
+              <DataRow
+                label="Location"
+                value={ipInfo ? `${ipInfo.city}, ${ipInfo.region}, ${ipInfo.country_name}` : null}
+                loading={loading}
+              />
+              <DataRow label="Timezone" value={ipInfo?.timezone} loading={loading} />
+            </CardContent>
+          </Card>
+
+          {/* Network Performance Card */}
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
-                <Globe className="w-4 h-4 text-blue-500" />
-                Public Identity
+                <Activity className="w-4 h-4 text-orange-500" />
+                Network Performance
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-0">
+              <DataRow label="Connection Type" value={latency.connectionType || null} loading={loading} />
+              {/* Live ping row */}
+              <div className="flex items-start justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
+                <span className="text-sm text-muted-foreground flex-shrink-0">Ping (1.1.1.1)</span>
+                {loading ? (
+                  <Skeleton className="h-4 w-20" />
+                ) : (
+                  <span
+                    className="text-sm font-medium text-right flex items-center gap-1.5"
+                    aria-live="polite"
+                    aria-label={latency.pingMs != null ? `Ping ${latency.pingMs} milliseconds` : "Ping unavailable"}
+                  >
+                    {/* Pulse dot shows while a ping is in-flight */}
+                    <span
+                      className={cn(
+                        "inline-block w-2 h-2 rounded-full bg-orange-400 flex-shrink-0",
+                        isPinging ? "animate-pulse" : "opacity-40"
+                      )}
+                      aria-hidden="true"
+                    />
+                    {latency.pingMs != null ? `${latency.pingMs} ms` : "—"}
+                  </span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Privacy & Tunnel Card */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Shield className="w-4 h-4 text-purple-500" />
+                Privacy & Tunnel
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-0">
-                <DataRow label="IP Address" value={ipInfo?.ip} loading={loading} />
-                <DataRow label="ISP / Org" value={ipInfo?.org || ipInfo?.isp} loading={loading} />
-                <DataRow
-                  label="Location"
-                  value={ipInfo ? `${ipInfo.city}, ${ipInfo.region}, ${ipInfo.country_name}` : null}
-                  loading={loading}
-                />
-                <DataRow label="Timezone" value={ipInfo?.timezone} loading={loading} />
-              </div>
+              {/* Tor status — hidden when not detected */}
+              {!loading && isTor && (
+                <div className="flex items-center justify-between py-1.5 border-b border-border/40">
+                  <span className="text-sm text-muted-foreground">Tor</span>
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-purple-600 px-2.5 py-0.5 text-xs font-semibold text-white">
+                    <Ghost className="w-3 h-3" />
+                    Active
+                  </span>
+                </div>
+              )}
 
-              {/* VPN Expected-Location Validator */}
-              <div className="pt-1 space-y-2">
+              {/* Expected VPN Exit Node selector */}
+              <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground font-medium">Expected VPN Exit Node</span>
@@ -417,19 +523,6 @@ export function Dashboard() {
                   );
                 })()}
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Network Performance Card */}
-          <Card className="shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Activity className="w-4 h-4 text-orange-500" />
-                Network Performance
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-0">
-              <DataRow label="Connection Type" value={latency.connectionType || null} loading={loading} />
             </CardContent>
           </Card>
 

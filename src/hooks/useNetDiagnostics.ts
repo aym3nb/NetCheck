@@ -16,7 +16,10 @@ export interface IpInfo {
 
 export interface ConnectionInfo {
   connectionType: string;
+  pingMs: number | null;
 }
+
+export type TunnelType = "VPN" | "Proxy" | null;
 
 export interface AuditEntry {
   timestamp: string; // ISO 8601
@@ -27,6 +30,9 @@ export interface AuditEntry {
 export interface DiagnosticState {
   ipInfo: IpInfo | null;
   latency: ConnectionInfo;
+  isTor: boolean;
+  tunnelType: TunnelType;
+  isPinging: boolean;
   loading: boolean;
   lastUpdated: Date | null;
   error: string | null;
@@ -35,6 +41,24 @@ export interface DiagnosticState {
 }
 
 const FETCH_TIMEOUT_MS = 5000;
+const PING_INTERVAL_MS = 3000;
+const PING_URL = "https://1.1.1.1/favicon.ico";
+
+// Known VPN provider keywords (case-insensitive)
+const VPN_KEYWORDS = [
+  "nordvpn", "nord vpn", "mullvad", "expressvpn", "express vpn",
+  "surfshark", "protonvpn", "proton vpn", "windscribe", "private internet access",
+  "pia vpn", "ivpn", "hidemyass", "ipvanish", "cyberghost", "purevpn",
+  "torguard", "airvpn", "perfect privacy",
+];
+
+// Hosting / datacenter keywords that suggest a proxy or cloud exit node
+const HOSTING_KEYWORDS = [
+  "hosting", "datacenter", "data center", "colocation", "cloud",
+  "digitalocean", "linode", "vultr", "amazon", "google", "microsoft",
+  "ovh", "hetzner", "leaseweb", "choopa", "cogent", "fastly", "cloudflare",
+  "akamai", "serverius", "quadranet", "m247",
+];
 
 interface BffIpInfoResponse {
   ip?: string;
@@ -49,6 +73,7 @@ interface BffIpInfoResponse {
   latitude?: number;
   longitude?: number;
   timezone?: string;
+  isTor?: boolean;
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
@@ -65,6 +90,35 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise
   }
 }
 
+async function fetchNoCorsWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, mode: "no-cors", signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Measures a single round-trip ping to 1.1.1.1 using a no-cors HEAD request. */
+async function measureLatency(): Promise<number | null> {
+  // Build the cache-busting URL before starting the timer so only network time is measured
+  const url = `${PING_URL}?_=${Date.now()}`;
+  const t0 = performance.now();
+  try {
+    await fetchNoCorsWithTimeout(url, { method: "HEAD" });
+    return Math.round(performance.now() - t0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Maps the raw navigator.connection fields to a human-readable label.
+ * - 'wifi' type → "Wi-Fi"
+ * - 'cellular' type: '5g' → "5G", '4g' → "4G", '3g' → "3G", otherwise "Cellular"
+ * - 'ethernet' or unknown → "Ethernet/Wired" (common for OpenWRT desktop setups)
+ */
 function getConnectionType(): string {
   const nav = navigator as Navigator & {
     connection?: { effectiveType?: string; type?: string };
@@ -72,8 +126,33 @@ function getConnectionType(): string {
     webkitConnection?: { effectiveType?: string; type?: string };
   };
   const conn = nav.connection || nav.mozConnection || nav.webkitConnection;
-  if (!conn) return "";
-  return conn.effectiveType || conn.type || "";
+  if (!conn) return "Ethernet/Wired";
+
+  const type = conn.type?.toLowerCase() ?? "";
+  const effective = conn.effectiveType?.toLowerCase() ?? "";
+
+  if (type === "wifi") return "Wi-Fi";
+  if (type === "cellular") {
+    if (effective === "5g") return "5G";
+    if (effective === "4g") return "4G";
+    if (effective === "3g") return "3G";
+    return "Cellular";
+  }
+  // ethernet, other, or unknown
+  if (type === "ethernet") return "Ethernet/Wired";
+  return "Ethernet/Wired";
+}
+
+/**
+ * Determines whether the ISP/org string indicates a VPN or Proxy/Hosting service.
+ * Returns "VPN" for known VPN providers, "Proxy" for datacenter/hosting IPs,
+ * or null for regular ISPs.
+ */
+function detectTunnelType(orgOrIsp: string): TunnelType {
+  const lower = orgOrIsp.toLowerCase();
+  if (VPN_KEYWORDS.some((k) => lower.includes(k))) return "VPN";
+  if (HOSTING_KEYWORDS.some((k) => lower.includes(k))) return "Proxy";
+  return null;
 }
 
 function isCorsOrNetworkError(err: unknown): boolean {
@@ -96,7 +175,10 @@ function makeEntry(event: string, statusCode: string, edgeLocation?: string | nu
 export function useNetDiagnostics(autoRefreshInterval = 60000) {
   const [state, setState] = useState<DiagnosticState>({
     ipInfo: null,
-    latency: { connectionType: "" },
+    latency: { connectionType: "", pingMs: null },
+    isTor: false,
+    tunnelType: null,
+    isPinging: false,
     loading: true,
     lastUpdated: null,
     error: null,
@@ -105,6 +187,17 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
   });
   const [autoRefresh, setAutoRefresh] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const runPing = useCallback(async () => {
+    setState((prev) => ({ ...prev, isPinging: true }));
+    const pingMs = await measureLatency();
+    setState((prev) => ({
+      ...prev,
+      isPinging: false,
+      latency: { ...prev.latency, pingMs },
+    }));
+  }, []);
 
   const runDiagnostics = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -115,6 +208,8 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
 
     // --- IP Info (via BFF) ---
     let ipInfo: IpInfo | null = null;
+    let isTor = false;
+    let tunnelType: TunnelType = null;
     try {
       const resp = await fetchWithTimeout(`${BFF_URL}/ip-info`);
       edgeLocation = resp.headers.get("X-NetCheck-Edge");
@@ -131,6 +226,8 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
         timezone: data.timezone ?? "",
         org: orgOrIsp,
       };
+      isTor = data.isTor === true;
+      tunnelType = isTor ? null : detectTunnelType(orgOrIsp);
       newEntries.push(makeEntry("IP Lookup", "200 OK", edgeLocation));
     } catch (err) {
       const code = isCorsOrNetworkError(err) ? "BFF Unavailable" : (err instanceof Error ? err.message : "ERR");
@@ -139,9 +236,15 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
 
     const connectionType = getConnectionType();
 
+    // Run initial ping immediately
+    const pingMs = await measureLatency();
+
     setState((prev) => ({
       ipInfo,
-      latency: { connectionType },
+      latency: { connectionType, pingMs },
+      isTor,
+      tunnelType,
+      isPinging: false,
       loading: false,
       lastUpdated: new Date(),
       error: null,
@@ -149,6 +252,21 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
       edgeLocation,
     }));
   }, []);
+
+  // Start live ping loop on mount; restart when diagnostics refresh
+  useEffect(() => {
+    // Clear any existing ping interval before setting a new one
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+    }
+    pingIntervalRef.current = setInterval(runPing, PING_INTERVAL_MS);
+    return () => {
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+    };
+  }, [runPing]);
 
   useEffect(() => {
     runDiagnostics();
