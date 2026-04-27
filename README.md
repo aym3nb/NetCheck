@@ -28,6 +28,9 @@
 
 NetCheck uses a **Backend-for-Frontend (BFF)** deployed as a Cloudflare Worker to handle cross-origin data aggregation and provide edge metadata. The frontend calls the BFF directly; the BFF in turn queries upstream APIs (ipapi.co, test.nextdns.io) server-side and returns normalised JSON with an `X-NetCheck-Edge` response header that identifies the Cloudflare edge location that served the request.
 
+- **BFF source**: [github.com/aym3nb/NetCheck-BFF](https://github.com/aym3nb/NetCheck-BFF)
+- **BFF worker**: `https://netcheck-bff.aym3nb-cf.workers.dev`
+
 > **Note**: Full IP and NextDNS diagnostics require the NetCheck-BFF to be reachable at `VITE_BFF_URL`. If the BFF is unavailable, those steps degrade gracefully to a "Service Unavailable" audit entry; DNS leak and latency tests continue to run client-side.
 
 ## Data Sources
@@ -36,8 +39,8 @@ The BFF (`https://netcheck-bff.aym3nb-cf.workers.dev`) aggregates upstream APIs 
 
 | Source | Purpose | How accessed |
 |---|---|---|
-| NetCheck-BFF `/ip-info` | Public IP, ASN/org, location, timezone | Via BFF (Cloudflare Worker) |
-| NetCheck-BFF `/nextdns` | NextDNS status (ok / unconfigured / not-using) | Via BFF (Cloudflare Worker) |
+| [NetCheck-BFF](https://github.com/aym3nb/NetCheck-BFF) `/ip-info` | Public IP, ASN/org, location, timezone | Via BFF (Cloudflare Worker) |
+| [NetCheck-BFF](https://github.com/aym3nb/NetCheck-BFF) `/nextdns` | NextDNS status (ok / unconfigured / not-using) | Via BFF (Cloudflare Worker) |
 | [edns.ip-api.com](https://edns.ip-api.com/) | Primary DNS resolver IP, ISP, and location | Client-side |
 | [bash.ws/dnsleak](https://bash.ws/) | Multi-resolver DNS leak detail (8 parallel probes) | Client-side (`no-cors`) |
 | [1.1.1.1](https://1.1.1.1/) | Latency probe | Client-side (`no-cors`) |
