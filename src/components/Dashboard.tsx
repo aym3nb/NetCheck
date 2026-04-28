@@ -229,13 +229,13 @@ function AuditLog({ entries, onReset }: { entries: AuditEntry[]; onReset: () => 
 
 
 export function Dashboard() {
-  const { ipInfo, latency, isTor, tunnelType, isPinging, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
+  const { ipInfo, latency, isTor, tunnelType, loading, lastUpdated, autoRefresh, setAutoRefresh, refresh, auditLog } =
     useNetDiagnostics();
   const { theme, toggleTheme } = useTheme();
   const [selectedCity, setSelectedCity] = useState<string>("");
 
   // Persistent manual verification state
-  const { isNextDNSVerified, isDNSLeakVerified, hasDNSLeak, setNextDNSVerified, setDNSLeakVerified, resetAudit } =
+  const { isNextDNSVerified, isDNSLeakVerified, hasDNSLeak, manualAuditEntries, setNextDNSVerified, setDNSLeakVerified, resetAudit } =
     usePersistentAudit();
 
   // Modal state for NextDNS verification
@@ -258,6 +258,11 @@ export function Dashboard() {
     isTor,
     vpnLocationMatch,
   });
+
+  // Merge auto-diagnostic entries (memory only) with persisted manual entries, newest first
+  const mergedAuditLog = [...auditLog, ...manualAuditEntries]
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, 100);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -416,6 +421,7 @@ export function Dashboard() {
             <CardContent className="space-y-0">
               <DataRow label="IP Address" value={ipInfo?.ip} loading={loading} />
               <DataRow label="ISP / Org" value={ipInfo?.org || ipInfo?.isp} loading={loading} />
+              {ipInfo?.asn && <DataRow label="ASN" value={ipInfo.asn} loading={loading} />}
               <DataRow
                 label="Location"
                 value={ipInfo ? `${ipInfo.city}, ${ipInfo.region}, ${ipInfo.country_name}` : null}
@@ -444,17 +450,18 @@ export function Dashboard() {
                   <span
                     className="text-sm font-medium text-right flex items-center gap-1.5"
                     aria-live="polite"
-                    aria-label={latency.pingMs != null ? `Ping ${latency.pingMs} milliseconds` : "Ping unavailable"}
+                    aria-label={latency.pingMs != null ? `Ping ${latency.pingMs} milliseconds` : "Ping timed out"}
                   >
-                    {/* Pulse dot shows while a ping is in-flight */}
                     <span
                       className={cn(
-                        "inline-block w-2 h-2 rounded-full bg-orange-400 flex-shrink-0",
-                        isPinging ? "animate-pulse" : "opacity-40"
+                        "font-semibold tabular-nums",
+                        latency.pingMs != null
+                          ? "text-emerald-400 animate-pulse [filter:drop-shadow(0_0_6px_rgb(52_211_153/0.7))]"
+                          : "text-red-500"
                       )}
-                      aria-hidden="true"
-                    />
-                    {latency.pingMs != null ? `${latency.pingMs} ms` : "—"}
+                    >
+                      {latency.pingMs != null ? `${latency.pingMs} ms` : "Timed Out"}
+                    </span>
                   </span>
                 )}
               </div>
@@ -596,7 +603,7 @@ export function Dashboard() {
         </div>
 
         {/* Audit Log */}
-        <AuditLog entries={auditLog} onReset={resetAudit} />
+        <AuditLog entries={mergedAuditLog} onReset={resetAudit} />
 
         <p className="text-center text-xs text-muted-foreground">
           Diagnostics powered by NetCheck-BFF on Cloudflare Edge.{" "}
