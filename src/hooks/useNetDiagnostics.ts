@@ -12,6 +12,7 @@ export interface IpInfo {
   longitude: number;
   timezone: string;
   org: string;
+  asn?: string;
 }
 
 export interface ConnectionInfo {
@@ -225,6 +226,7 @@ export function useNetDiagnostics(autoRefreshInterval = 60000) {
         longitude: typeof data.longitude === "number" ? data.longitude : 0,
         timezone: data.timezone ?? "",
         org: orgOrIsp,
+        asn: data.asn != null ? String(data.asn) : undefined,
       };
       isTor = data.isTor === true;
       tunnelType = isTor ? null : detectTunnelType(orgOrIsp);
